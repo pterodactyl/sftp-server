@@ -8,7 +8,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 	"io"
+	"io/ioutil"
 	"net"
+	"path"
 )
 
 type Configuration struct {
@@ -47,14 +49,25 @@ func Configure(config Configuration) error {
 		},
 	}
 
-	fmt.Printf("%s:%s", ip, string(port))
+	privateBytes, err := ioutil.ReadFile(path.Join(path.Dir(config.Path), ".sftp/id_rsa"))
+	if err != nil {
+		return err
+	}
+
+	private, err := ssh.ParsePrivateKey(privateBytes)
+	if err != nil {
+		return err
+	}
+
+	// Add our private key to the server configuration.
+	serverConfig.AddHostKey(private)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", ip, string(port)))
 	if err != nil {
 		return err
 	}
-	logger.Get().Infow("server listener registered", zap.String("address", listener.Addr().String()))
 
+	logger.Get().Infow("server listener registered", zap.String("address", listener.Addr().String()))
 	netC, err := listener.Accept()
 	if err != nil {
 		return err
@@ -63,7 +76,7 @@ func Configure(config Configuration) error {
 	// Before beginning a handshake must be performed on the incoming net.Conn
 	_, chans, reqs, err := ssh.NewServerConn(netC, serverConfig)
 	if err != nil {
-		return err
+		logger.Get().Error("failed to accept an incoming connection", zap.Error(err))
 	}
 
 	go ssh.DiscardRequests(reqs)
@@ -73,6 +86,7 @@ func Configure(config Configuration) error {
 		// know how to handle at this point.
 		if newChannel.ChannelType() != "session" {
 			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+			logger.Get().Debugw("received an unknown channel type", zap.String("channel", newChannel.ChannelType()))
 			continue
 		}
 
@@ -111,7 +125,7 @@ func Configure(config Configuration) error {
 		if err := server.Serve(); err == io.EOF {
 			server.Close()
 		} else if err != nil {
-			logger.Get().Error("sftp server closed with error", zap.Error(err))
+			logger.Get().Errorw("sftp server closed with error", zap.Error(err))
 		}
 	}
 

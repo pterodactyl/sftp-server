@@ -32,6 +32,7 @@ func CreateHandler(directory string) sftp.Handlers {
 	}
 }
 
+// Creates a reader for a file on the system and returns the reader back.
 func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	path, err := fs.buildPath(request.Filepath)
 	if err != nil {
@@ -52,8 +53,48 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	return file, nil
 }
 
+// Handle a write action for a file on the system.
 func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
-	return nil, errors.New("not implemented")
+	path, err := fs.buildPath(request.Filepath)
+	if err != nil {
+		return nil, sftp.ErrSshFxNoSuchFile
+	}
+
+	fs.lock.Lock()
+	defer fs.lock.Unlock()
+
+	_, statErr := os.Stat(path)
+	// If the file already exists we can just return the io.WriterAt instance for it.
+	if !os.IsNotExist(statErr) {
+		file, err := os.OpenFile(path, int(request.Flags), 0644)
+		if err != nil {
+			logger.Get().Errorw("error writing to existing file",
+				zap.Uint32("flags", request.Flags),
+				zap.String("source", path),
+				zap.Error(err),
+			)
+			return nil, sftp.ErrSshFxFailure
+		}
+
+		return file, nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		logger.Get().Errorw("error making path for file",
+			zap.String("source", path),
+			zap.String("path", filepath.Dir(path)),
+			zap.Error(err),
+		)
+		return nil, sftp.ErrSshFxFailure
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		logger.Get().Errorw("error creating file", zap.String("source", path), zap.Error(err))
+		return nil, sftp.ErrSshFxFailure
+	}
+
+	return file, nil
 }
 
 // Hander for basic SFTP system calls related to files, but not anything to do with reading

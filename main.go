@@ -1,10 +1,14 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"github.com/pterodactyl/sftp-server/src/logger"
 	"github.com/pterodactyl/sftp-server/src/server"
 	"go.uber.org/zap"
+	"io/ioutil"
+	"os"
+	"path"
 )
 
 func main() {
@@ -31,11 +35,35 @@ func main() {
 
 	logger.Get().Infow("reading configuration from path", zap.String("config-path", configLocation))
 
-	if err := server.Configure(server.Configuration{
-		Path: configLocation,
-		ReadOnly: readOnlyMode,
-		Debug: debugMode,
-	}); err != nil {
-		logger.Get().Fatalw("fatal error starting SFTP server", zap.Error(err))
+
+	c, err := readConfiguration(configLocation)
+	if err != nil {
+		logger.Get().Fatalw("could not read configuration", zap.Error(err))
 	}
+
+	var s = server.Configuration{
+		Data: c,
+		Settings: server.Settings{
+			BasePath: path.Dir(configLocation),
+			Debug: debugMode,
+			ReadOnly: readOnlyMode,
+		},
+	}
+
+	if err := s.Initalize(); err != nil {
+		logger.Get().Fatalw("could not start SFTP server", zap.Error(err))
+	}
+}
+
+func readConfiguration(path string) ([]byte, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, errors.New("could not locate a configuration file at the specified path")
+	}
+
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }

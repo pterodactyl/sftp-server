@@ -13,24 +13,24 @@ import (
 	"path"
 )
 
-type Configuration struct {
-	Path     string
+type Settings struct {
+	BasePath string
 	Debug    bool
 	ReadOnly bool
 }
 
-func Configure(config Configuration) error {
-	c, err := readConfiguration(config.Path)
-	if err != nil {
-		return err
-	}
+type Configuration struct {
+	Data     []byte
+	Settings Settings
+}
 
-	port, _ := jsonparser.GetString(c, "sftp", "port")
+func (c Configuration) Initalize() error {
+	port, _ := jsonparser.GetString(c.Data, "sftp", "port")
 	if port == "" {
 		port = "2022"
 	}
 
-	ip, _ := jsonparser.GetString(c, "sftp", "ip")
+	ip, _ := jsonparser.GetString(c.Data, "sftp", "ip")
 	if ip == "" {
 		ip = "0.0.0.0"
 	}
@@ -38,18 +38,18 @@ func Configure(config Configuration) error {
 	serverConfig := &ssh.ServerConfig{
 		NoClientAuth: false,
 		MaxAuthTries: 6,
-		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			logger.Get().Debugw("received connection to SFTP server", zap.String("user", c.User()))
+		PasswordCallback: func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			logger.Get().Debugw("received connection to SFTP server", zap.String("user", conn.User()))
 
-			if c.User() == "dane" && string(pass) == "test" {
+			if conn.User() == "dane" && string(pass) == "test" {
 				return nil, nil
 			}
 
-			return nil, fmt.Errorf("password rejected for %q", c.User())
+			return nil, fmt.Errorf("password rejected for %q", conn.User())
 		},
 	}
 
-	privateBytes, err := ioutil.ReadFile(path.Join(path.Dir(config.Path), ".sftp/id_rsa"))
+	privateBytes, err := ioutil.ReadFile(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func Configure(config Configuration) error {
 	for {
 		conn, _ := listener.Accept()
 		if conn != nil {
-			go inboundConnection(conn, serverConfig)
+			go c.AcceptInboundConnection(conn, serverConfig)
 		}
 	}
 
@@ -81,16 +81,16 @@ func Configure(config Configuration) error {
 
 // Handles an inbound connection to the instance and determines if we should serve the request
 // or not.
-func inboundConnection(c net.Conn, config *ssh.ServerConfig) {
-	defer c.Close()
+func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.ServerConfig) {
+	defer conn.Close()
 
 	// Before beginning a handshake must be performed on the incoming net.Conn
-	_, chans, reqs, err := ssh.NewServerConn(c, config)
+	_, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
 		logger.Get().Error("failed to accept an incoming connection", zap.Error(err))
 	}
 
-	logger.Get().Debugw("accepted inbound connection", zap.String("ip", c.RemoteAddr().String()))
+	logger.Get().Debugw("accepted inbound connection", zap.String("ip", conn.RemoteAddr().String()))
 
 	go ssh.DiscardRequests(reqs)
 
@@ -110,7 +110,7 @@ func inboundConnection(c net.Conn, config *ssh.ServerConfig) {
 
 		// Channels have a type that is dependent on the protocol. For SFTP this is "subsystem"
 		// with a payload that (should) be "sftp". Discard anything else we receive ("pty", "shell", etc)
-		go func (in <-chan *ssh.Request) {
+		go func(in <-chan *ssh.Request) {
 			for req := range in {
 				ok := false
 

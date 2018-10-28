@@ -65,14 +65,19 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 	_, statErr := os.Stat(path)
 	// If the file already exists we can just return the io.WriterAt instance for it.
-	if !os.IsNotExist(statErr) {
-		file, err := os.OpenFile(path, int(request.Flags), 0644)
-		if err != nil {
-			logger.Get().Errorw("error writing to existing file",
-				zap.Uint32("flags", request.Flags),
+	if os.IsNotExist(statErr) {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			logger.Get().Errorw("error making path for file",
 				zap.String("source", path),
+				zap.String("path", filepath.Dir(path)),
 				zap.Error(err),
 			)
+			return nil, sftp.ErrSshFxFailure
+		}
+
+		file, err := os.Create(path)
+		if err != nil {
+			logger.Get().Errorw("error creating file", zap.String("source", path), zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 
@@ -82,18 +87,13 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxFailure
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		logger.Get().Errorw("error making path for file",
+	file, err := os.OpenFile(path, int(request.Flags), 0644)
+	if err != nil {
+		logger.Get().Errorw("error writing to existing file",
+			zap.Uint32("flags", request.Flags),
 			zap.String("source", path),
-			zap.String("path", filepath.Dir(path)),
 			zap.Error(err),
 		)
-		return nil, sftp.ErrSshFxFailure
-	}
-
-	file, err := os.Create(path)
-	if err != nil {
-		logger.Get().Errorw("error creating file", zap.String("source", path), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure
 	}
 

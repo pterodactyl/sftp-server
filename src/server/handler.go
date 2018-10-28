@@ -38,14 +38,84 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	return nil, errors.New("not implemented")
 }
 
+// Hander for basic SFTP system calls related to files, but not anything to do with reading
+// or writing to those files.
 func (fs FileSystem) Filecmd(request *sftp.Request) error {
-	return errors.New("not implemented")
+	path, err := fs.buildPath(request.Filepath)
+	if err != nil {
+		return sftp.ErrSshFxNoSuchFile
+	}
+
+	var target string
+	// If a target is provided in this request validate that it is going to the correct
+	// location for the server. If it is not, return an operation unsupported error. This
+	// is maybe not the best error response, but its not wrong either.
+	if request.Target != "" {
+		target, err = fs.buildPath(request.Target)
+		if err != nil {
+			return sftp.ErrSshFxOpUnsupported
+		}
+	}
+
+	switch request.Method {
+	// Need to add this in eventually, should work similarly to the current daemon.
+	case "SetStat", "Setstat":
+		return sftp.ErrSshFxOpUnsupported
+	case "Rename":
+		if err := os.Rename(path, target); err != nil {
+			logger.Get().Errorw("failed to rename file",
+				zap.String("source", path),
+				zap.String("target", target),
+				zap.Error(err),
+			)
+			return sftp.ErrSshFxFailure
+		}
+
+		return sftp.ErrSshFxOk
+	case "Rmdir":
+		if err := os.RemoveAll(path); err != nil {
+			logger.Get().Errorw("failed to remove directory", zap.String("source", path), zap.Error(err))
+			return sftp.ErrSshFxFailure
+		}
+
+		return sftp.ErrSshFxOk
+	case "Mkdir":
+		if err := os.MkdirAll(path, 0755); err != nil {
+			logger.Get().Errorw("failed to create directory", zap.String("source", path), zap.Error(err))
+			return sftp.ErrSshFxFailure
+		}
+
+		return sftp.ErrSshFxOk
+	case "Symlink":
+		if err := os.Symlink(path, target); err != nil {
+			logger.Get().Errorw("failed to create symlink",
+				zap.String("source", path),
+				zap.String("target", target),
+				zap.Error(err),
+			)
+			return sftp.ErrSshFxFailure
+		}
+
+		return sftp.ErrSshFxOk
+	case "Remove":
+		if err := os.Remove(path); err != nil {
+			logger.Get().Errorw("failed to remove a file", zap.String("source", path), zap.Error(err))
+			return sftp.ErrSshFxFailure
+		}
+
+		return sftp.ErrSshFxOk
+	default:
+		return sftp.ErrSshFxOpUnsupported
+	}
 }
 
 // Handler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
 func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
-	path := fs.buildPath(request.Filepath)
+	path, err := fs.buildPath(request.Filepath)
+	if err != nil {
+		return nil, sftp.ErrSshFxNoSuchFile
+	}
 
 	switch request.Method {
 	case "List":
@@ -72,14 +142,13 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 		}
 
 		return ListerAt([]os.FileInfo{s}), nil
-	// Before adding readlink support we need to evaluate any potential security risks
-	// as a result of navigating around to a location that is outside the home directory
-	// for the logged in user. I don't forsee it being much of a problem, but I do want to
-	// check it out before slapping some code here.
-	//
-	// Until then, we'll just return an unsupported response code.
-	//
-	// case "Readlink":
+		// Before adding readlink support we need to evaluate any potential security risks
+		// as a result of navigating around to a location that is outside the home directory
+		// for the logged in user. I don't forsee it being much of a problem, but I do want to
+		// check it out before slapping some code here. Until then, we'll just return an
+		// unsupported response code.
+		//
+		// case "Readlink":
 	default:
 		return nil, sftp.ErrSshFxOpUnsupported
 	}
@@ -87,16 +156,13 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 
 // Normalizes a directory we get from the SFTP request to ensure the user is not able to escape
 // from their data directory. After normalization if the directory is still within their home
-// path it is returned. If they managed to "escape", their home path is returned.
-//
-// Effectively, if the directory is outside of their home folder their home path is returned so
-// that it appears they've just reached their top-most directory.
-func (fs FileSystem) buildPath(path string) string {
-	p := filepath.Clean(filepath.Join(fs.directory, path))
+// path it is returned. If they managed to "escape" an error will be returned.
+func (fs FileSystem) buildPath(rawPath string) (string, error) {
+	path := filepath.Clean(filepath.Join(fs.directory, rawPath))
 
-	if !strings.HasPrefix(p, fs.directory) {
-		return fs.directory
+	if !strings.HasPrefix(path, fs.directory) {
+		return "", errors.New("invalid path resolution")
 	}
 
-	return p
+	return path, nil
 }

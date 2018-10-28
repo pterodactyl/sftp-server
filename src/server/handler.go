@@ -10,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type FileSystem struct {
 	directory string
+	lock      sync.Mutex
 }
 
 // Creates a new SFTP handler for a given server. The directory argument should
@@ -31,7 +33,23 @@ func CreateHandler(directory string) sftp.Handlers {
 }
 
 func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
-	return nil, errors.New("not implemented")
+	path, err := fs.buildPath(request.Filepath)
+	if err != nil {
+		return nil, sftp.ErrSshFxNoSuchFile
+	}
+
+	fs.lock.Lock()
+	defer fs.lock.Unlock()
+
+	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
+	if err == os.ErrNotExist {
+		return nil, sftp.ErrSshFxNoSuchFile
+	} else if err != nil {
+		logger.Get().Errorw("could not open file for reading", zap.String("source", path), zap.Error(err))
+		return nil, sftp.ErrSshFxFailure
+	}
+
+	return file, nil
 }
 
 func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {

@@ -38,7 +38,7 @@ func Configure(config Configuration) error {
 	serverConfig := &ssh.ServerConfig{
 		NoClientAuth: false,
 		MaxAuthTries: 6,
-		PasswordCallback: func (c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			logger.Get().Debugw("received connection to SFTP server", zap.String("user", c.User()))
 
 			if c.User() == "dane" && string(pass) == "test" {
@@ -112,15 +112,12 @@ func Configure(config Configuration) error {
 			}
 		}(requests)
 
-		var serverOptions []sftp.ServerOption
-		if config.ReadOnly {
-			serverOptions = append(serverOptions, sftp.ReadOnly())
-		}
+		// Create a new SFTP filesystem handler. This is currently hard-coded because I'm lazy and
+		// haven't yet gotten around to actually hitting the API and getting the expected results back.
+		fs := CreateHandler("/Users/dane/Downloads")
 
-		server, err := sftp.NewServer(channel, serverOptions...)
-		if err != nil {
-			logger.Get().Errorw("failed to create new sftp server instance", zap.Error(err))
-		}
+		// Create the server instance for the channel using the filesystem we created above.
+		server := sftp.NewRequestServer(channel, fs)
 
 		if err := server.Serve(); err == io.EOF {
 			server.Close()

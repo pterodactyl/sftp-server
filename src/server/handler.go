@@ -64,7 +64,8 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	defer fs.lock.Unlock()
 
 	_, statErr := os.Stat(path)
-	// If the file already exists we can just return the io.WriterAt instance for it.
+	// If the file doesn't exist we need to create it, as well as the directory pathway
+	// leading up to where that file will be created.
 	if os.IsNotExist(statErr) {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			logger.Get().Errorw("error making path for file",
@@ -87,6 +88,9 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxFailure
 	}
 
+	// If we've made it here it means the file already exists and we don't need to do anything
+	// fancy to handle it. Just pass over the request flags so the system knows what the end
+	// goal with the file is going to be.
 	file, err := os.OpenFile(path, int(request.Flags), 0644)
 	if err != nil {
 		logger.Get().Errorw("error writing to existing file",

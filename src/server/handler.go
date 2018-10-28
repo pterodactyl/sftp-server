@@ -77,6 +77,9 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		}
 
 		return file, nil
+	} else if err != nil {
+		logger.Get().Errorw("error performing file stat", zap.String("source", path), zap.Error(err))
+		return nil, sftp.ErrSshFxFailure
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

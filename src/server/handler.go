@@ -45,33 +45,40 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 // Handler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
 func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
-	d := fs.buildPath(request.Filepath)
+	path := fs.buildPath(request.Filepath)
 
 	switch request.Method {
 	case "List":
-		files, err := ioutil.ReadDir(d)
+		files, err := ioutil.ReadDir(path)
 		if err != nil {
-			logger.Get().Error("error listing directory?")
-			return nil, err
+			logger.Get().Error("error listing directory", zap.Error(err))
+			return nil, sftp.ErrSshFxFailure
 		}
 
 		return ListerAt(files), nil
 	case "Stat":
-		file, err := os.Open(d)
+		file, err := os.Open(path)
 		defer file.Close()
 
 		if err != nil {
 			logger.Get().Error("error opening file for stat", zap.Error(err))
-			return nil, err
+			return nil, sftp.ErrSshFxFailure
 		}
 
 		s, err := file.Stat()
 		if err != nil {
 			logger.Get().Error("error statting file", zap.Error(err))
-			return nil, err
+			return nil, sftp.ErrSshFxFailure
 		}
 
 		return ListerAt([]os.FileInfo{s}), nil
+	// Before adding readlink support we need to evaluate any potential security risks
+	// as a result of navigating around to a location that is outside the home directory
+	// for the logged in user. I don't forsee it being much of a problem, but I do want to
+	// check it out before slapping some code here.
+	//
+	// Until then, we'll just return an unsupported response code.
+	//
 	// case "Readlink":
 	default:
 		return nil, sftp.ErrSshFxOpUnsupported

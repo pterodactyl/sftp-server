@@ -68,16 +68,29 @@ func Configure(config Configuration) error {
 	}
 
 	logger.Get().Infow("server listener registered", zap.String("address", listener.Addr().String()))
-	netC, err := listener.Accept()
-	if err != nil {
-		return err
+
+	for {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			go inboundConnection(conn, serverConfig)
+		}
 	}
 
+	return nil
+}
+
+// Handles an inbound connection to the instance and determines if we should serve the request
+// or not.
+func inboundConnection(c net.Conn, config *ssh.ServerConfig) {
+	defer c.Close()
+
 	// Before beginning a handshake must be performed on the incoming net.Conn
-	_, chans, reqs, err := ssh.NewServerConn(netC, serverConfig)
+	_, chans, reqs, err := ssh.NewServerConn(c, config)
 	if err != nil {
 		logger.Get().Error("failed to accept an incoming connection", zap.Error(err))
 	}
+
+	logger.Get().Debugw("accepted inbound connection", zap.String("ip", c.RemoteAddr().String()))
 
 	go ssh.DiscardRequests(reqs)
 
@@ -85,8 +98,8 @@ func Configure(config Configuration) error {
 		// If its not a session channel we just move on because its not something we
 		// know how to handle at this point.
 		if newChannel.ChannelType() != "session" {
-			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
 			logger.Get().Debugw("received an unknown channel type", zap.String("channel", newChannel.ChannelType()))
+			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
 			continue
 		}
 
@@ -125,6 +138,4 @@ func Configure(config Configuration) error {
 			logger.Get().Errorw("sftp server closed with error", zap.Error(err))
 		}
 	}
-
-	return nil
 }

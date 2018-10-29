@@ -29,8 +29,8 @@ type Settings struct {
 }
 
 type Configuration struct {
-	Data       []byte
-	Settings   Settings
+	Data     []byte
+	Settings Settings
 }
 
 func (c Configuration) Initalize() error {
@@ -196,10 +196,15 @@ func (c Configuration) validateCredentials(user string, pass []byte) (*ssh.Permi
 	defer resp.Body.Close()
 	body, _ := ioutil.ReadAll(resp.Body)
 
-	e, _ := jsonparser.GetString(body, "error")
-	es, _ := jsonparser.GetString(body, "errors")
-	if e != "" || len(es) != 0 {
-		return nil, fmt.Errorf("error from server response: %s", e)
+	if resp.StatusCode != 200 {
+		// this is tragic, need to update the panel code to not do this at some point.
+		e, _ := jsonparser.GetString(body, "error")
+		es, _ := jsonparser.GetString(body, "errors")
+		if e != "" || len(es) != 0 {
+			return nil, fmt.Errorf("error response from server: %s", e)
+		}
+
+		return nil, errors.New("bad response from authentication server")
 	}
 
 	server, err := jsonparser.GetString(body, "server")

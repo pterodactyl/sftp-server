@@ -5,6 +5,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/pterodactyl/sftp-server/src/logger"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,15 +15,21 @@ import (
 )
 
 type FileSystem struct {
-	directory string
-	lock      sync.Mutex
+	directory   string
+	uuid        string
+	permissions map[string]string
+	lock        sync.Mutex
 }
 
 // Creates a new SFTP handler for a given server. The directory argument should
 // be the base directory for a server. All actions done on the server will be
 // relative to that directory, and the user will not be able to escape out of it.
-func CreateHandler(directory string) sftp.Handlers {
-	p := FileSystem{directory: directory}
+func CreateHandler(base string, perm *ssh.Permissions) sftp.Handlers {
+	p := FileSystem{
+		//directory: path.Join(base, perm.Extensions["uuid"]),
+		directory: "/Users/dane/Downloads",
+		uuid:      perm.Extensions["uuid"],
+	}
 
 	return sftp.Handlers{
 		FileGet:  p,

@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/buger/jsonparser"
+	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
 	"github.com/pterodactyl/sftp-server/src/logger"
 	"go.uber.org/zap"
@@ -10,8 +13,14 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"path"
 )
+
+type AuthenticationRequest struct {
+	User string `json:"username"`
+	Pass string `json:"password"`
+}
 
 type Settings struct {
 	BasePath string
@@ -20,8 +29,8 @@ type Settings struct {
 }
 
 type Configuration struct {
-	Data     []byte
-	Settings Settings
+	Data       []byte
+	Settings   Settings
 }
 
 func (c Configuration) Initalize() error {
@@ -39,13 +48,12 @@ func (c Configuration) Initalize() error {
 		NoClientAuth: false,
 		MaxAuthTries: 6,
 		PasswordCallback: func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			logger.Get().Debugw("received connection to SFTP server", zap.String("user", conn.User()))
-
-			if conn.User() == "dane" && string(pass) == "test" {
-				return nil, nil
+			sp, err := c.validateCredentials(conn.User(), pass)
+			if err != nil {
+				return nil, errors.New("could not validate credentials")
 			}
 
-			return nil, fmt.Errorf("password rejected for %q", conn.User())
+			return sp, nil
 		},
 	}
 
@@ -85,12 +93,17 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 	defer conn.Close()
 
 	// Before beginning a handshake must be performed on the incoming net.Conn
-	_, chans, reqs, err := ssh.NewServerConn(conn, config)
+	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
 		logger.Get().Error("failed to accept an incoming connection", zap.Error(err))
 	}
+	defer sconn.Close()
 
-	logger.Get().Debugw("accepted inbound connection", zap.String("ip", conn.RemoteAddr().String()))
+	logger.Get().Debugw("accepted inbound connection",
+		zap.String("ip", conn.RemoteAddr().String()),
+		zap.String("user", sconn.Permissions.Extensions["user"]),
+		zap.String("uuid", sconn.Permissions.Extensions["uuid"]),
+	)
 
 	go ssh.DiscardRequests(reqs)
 
@@ -125,9 +138,19 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 			}
 		}(requests)
 
-		// Create a new SFTP filesystem handler. This is currently hard-coded because I'm lazy and
-		// haven't yet gotten around to actually hitting the API and getting the expected results back.
-		fs := CreateHandler("/Users/dane/Downloads")
+		// Configure the user's home folder for the rest of the request cycle.
+		if sconn.Permissions.Extensions["uuid"] == "" {
+			logger.Get().Errorw("got a server connection with no uuid")
+			continue
+		}
+
+		base, err := jsonparser.GetString(c.Data, "sftp", "path")
+		if err != nil || base == "" {
+			base = "/srv/daemon-data"
+		}
+
+		// Create a new handler for the currently logged in user's server.
+		fs := CreateHandler(base, sconn.Permissions)
 
 		// Create the server instance for the channel using the filesystem we created above.
 		server := sftp.NewRequestServer(channel, fs)
@@ -138,4 +161,56 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 			logger.Get().Errorw("sftp server closed with error", zap.Error(err))
 		}
 	}
+}
+
+// Validates a set of credentials for a SFTP login aganist Pterodactyl Panel and returns
+// the server's UUID if the credentials were valid.
+func (c Configuration) validateCredentials(user string, pass []byte) (*ssh.Permissions, error) {
+	data, _ := json.Marshal(AuthenticationRequest{User: user, Pass: string(pass)})
+
+	url, err := jsonparser.GetString(c.Data, "remote", "base")
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/remote/sftp", url), bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := jsonparser.GetString(c.Data, "keys", "[0]")
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/vnd.pterodactyl.v1+json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+
+	e, _ := jsonparser.GetString(body, "error")
+	es, _ := jsonparser.GetString(body, "errors")
+	if e != "" || len(es) != 0 {
+		return nil, fmt.Errorf("error from server response: %s", e)
+	}
+
+	server, err := jsonparser.GetString(body, "server")
+	if err != nil {
+		return nil, err
+	}
+
+	p := &ssh.Permissions{}
+	p.Extensions = make(map[string]string)
+	p.Extensions["uuid"] = server
+	p.Extensions["user"] = user
+
+	return p, nil
 }

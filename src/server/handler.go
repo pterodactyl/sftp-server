@@ -72,6 +72,10 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 
 // Handle a write action for a file on the system.
 func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
+	if fs.readOnly {
+		return nil, sftp.ErrSshFxOpUnsupported
+	}
+
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
@@ -137,6 +141,10 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 // Hander for basic SFTP system calls related to files, but not anything to do with reading
 // or writing to those files.
 func (fs FileSystem) Filecmd(request *sftp.Request) error {
+	if fs.readOnly {
+		return sftp.ErrSshFxOpUnsupported
+	}
+
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return sftp.ErrSshFxNoSuchFile

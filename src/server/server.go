@@ -70,7 +70,7 @@ func (c Configuration) Initalize() error {
 	// Add our private key to the server configuration.
 	serverConfig.AddHostKey(private)
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", c.Settings.BindAddress, string(c.Settings.BindPort)))
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", c.Settings.BindAddress, c.Settings.BindPort))
 	if err != nil {
 		return err
 	}

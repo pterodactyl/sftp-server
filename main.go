@@ -23,7 +23,7 @@ func main() {
 	flag.StringVar(&configLocation, "config-path", "./config/core.json", "the location of your Daemon configuration file")
 	flag.IntVar(&bindPort, "port", 2022, "the port this server should bind to")
 	flag.StringVar(&bindAddress, "bind-addr", "0.0.0.0", "the address this server should bind to")
-	flag.BoolVar(&readOnlyMode, "read-only", false, "determines if this server should run in read-only mode")
+	flag.BoolVar(&readOnlyMode, "readonly", false, "determines if this server should run in read-only mode")
 	flag.BoolVar(&debugMode, "debug", false, "determines if the server should output debug information")
 	flag.Parse()
 

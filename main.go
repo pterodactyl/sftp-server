@@ -14,27 +14,22 @@ import (
 func main() {
 	var (
 		configLocation string
-		readOnlyMode bool
-		debugMode bool
+		bindPort       int
+		bindAddress    string
+		readOnlyMode   bool
+		debugMode      bool
 	)
 
 	flag.StringVar(&configLocation, "config-path", "./config/core.json", "the location of your Daemon configuration file")
+	flag.IntVar(&bindPort, "port", 2022, "the port this server should bind to")
+	flag.StringVar(&bindAddress, "bind-addr", "0.0.0.0", "the address this server should bind to")
 	flag.BoolVar(&readOnlyMode, "read-only", false, "determines if this server should run in read-only mode")
 	flag.BoolVar(&debugMode, "debug", false, "determines if the server should output debug information")
 	flag.Parse()
 
-	logger.Initialize()
-
-	if debugMode == true {
-		logger.Get().Infow("running server in debug mode")
-	}
-
-	if readOnlyMode == true {
-		logger.Get().Infow("running server in read-only mode")
-	}
+	logger.Initialize(debugMode)
 
 	logger.Get().Infow("reading configuration from path", zap.String("config-path", configLocation))
-
 
 	c, err := readConfiguration(configLocation)
 	if err != nil {
@@ -44,9 +39,10 @@ func main() {
 	var s = server.Configuration{
 		Data: c,
 		Settings: server.Settings{
-			BasePath: path.Dir(configLocation),
-			Debug: debugMode,
-			ReadOnly: readOnlyMode,
+			BasePath:    path.Dir(configLocation),
+			ReadOnly:    readOnlyMode,
+			BindAddress: bindAddress,
+			BindPort:    bindPort,
 		},
 	}
 

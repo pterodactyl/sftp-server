@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,18 +19,19 @@ type FileSystem struct {
 	directory   string
 	uuid        string
 	permissions []string
+	readOnly    bool
 	lock        sync.Mutex
 }
 
 // Creates a new SFTP handler for a given server. The directory argument should
 // be the base directory for a server. All actions done on the server will be
 // relative to that directory, and the user will not be able to escape out of it.
-func CreateHandler(base string, perm *ssh.Permissions) sftp.Handlers {
+func CreateHandler(base string, perm *ssh.Permissions, ro bool) sftp.Handlers {
 	p := FileSystem{
-		//directory: path.Join(base, perm.Extensions["uuid"]),
-		directory:   "/Users/dane/Downloads",
+		directory:   path.Join(base, perm.Extensions["uuid"]),
 		uuid:        perm.Extensions["uuid"],
 		permissions: strings.Split(perm.Extensions["permissions"], ","),
+		readOnly:    ro,
 	}
 
 	return sftp.Handlers{
@@ -49,7 +51,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
-	path, err := fs.buildPath(request.Filepath)
+	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
@@ -57,11 +59,11 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
-	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
+	file, err := os.OpenFile(p, os.O_RDONLY, 0644)
 	if err == os.ErrNotExist {
 		return nil, sftp.ErrSshFxNoSuchFile
 	} else if err != nil {
-		logger.Get().Errorw("could not open file for reading", zap.String("source", path), zap.Error(err))
+		logger.Get().Errorw("could not open file for reading", zap.String("source", p), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -70,7 +72,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 
 // Handle a write action for a file on the system.
 func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
-	path, err := fs.buildPath(request.Filepath)
+	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
@@ -78,7 +80,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
-	_, statErr := os.Stat(path)
+	_, statErr := os.Stat(p)
 	// If the file doesn't exist we need to create it, as well as the directory pathway
 	// leading up to where that file will be created.
 	if os.IsNotExist(statErr) {
@@ -89,24 +91,24 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		}
 
 		// Create all of the directories leading up to the location where this file is being created.
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			logger.Get().Errorw("error making path for file",
-				zap.String("source", path),
-				zap.String("path", filepath.Dir(path)),
+				zap.String("source", p),
+				zap.String("path", filepath.Dir(p)),
 				zap.Error(err),
 			)
 			return nil, sftp.ErrSshFxFailure
 		}
 
-		file, err := os.Create(path)
+		file, err := os.Create(p)
 		if err != nil {
-			logger.Get().Errorw("error creating file", zap.String("source", path), zap.Error(err))
+			logger.Get().Errorw("error creating file", zap.String("source", p), zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 
 		return file, nil
 	} else if err != nil {
-		logger.Get().Errorw("error performing file stat", zap.String("source", path), zap.Error(err))
+		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -119,11 +121,11 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
-	file, err := os.OpenFile(path, int(request.Flags), 0644)
+	file, err := os.OpenFile(p, int(request.Flags), 0644)
 	if err != nil {
 		logger.Get().Errorw("error writing to existing file",
 			zap.Uint32("flags", request.Flags),
-			zap.String("source", path),
+			zap.String("source", p),
 			zap.Error(err),
 		)
 		return nil, sftp.ErrSshFxFailure
@@ -135,7 +137,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 // Hander for basic SFTP system calls related to files, but not anything to do with reading
 // or writing to those files.
 func (fs FileSystem) Filecmd(request *sftp.Request) error {
-	path, err := fs.buildPath(request.Filepath)
+	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return sftp.ErrSshFxNoSuchFile
 	}
@@ -160,9 +162,9 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
-		if err := os.Rename(path, target); err != nil {
+		if err := os.Rename(p, target); err != nil {
 			logger.Get().Errorw("failed to rename file",
-				zap.String("source", path),
+				zap.String("source", p),
 				zap.String("target", target),
 				zap.Error(err),
 			)
@@ -175,8 +177,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
-		if err := os.RemoveAll(path); err != nil {
-			logger.Get().Errorw("failed to remove directory", zap.String("source", path), zap.Error(err))
+		if err := os.RemoveAll(p); err != nil {
+			logger.Get().Errorw("failed to remove directory", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 
@@ -186,8 +188,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
-		if err := os.MkdirAll(path, 0755); err != nil {
-			logger.Get().Errorw("failed to create directory", zap.String("source", path), zap.Error(err))
+		if err := os.MkdirAll(p, 0755); err != nil {
+			logger.Get().Errorw("failed to create directory", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 
@@ -197,9 +199,9 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
-		if err := os.Symlink(path, target); err != nil {
+		if err := os.Symlink(p, target); err != nil {
 			logger.Get().Errorw("failed to create symlink",
-				zap.String("source", path),
+				zap.String("source", p),
 				zap.String("target", target),
 				zap.Error(err),
 			)
@@ -212,8 +214,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
-		if err := os.Remove(path); err != nil {
-			logger.Get().Errorw("failed to remove a file", zap.String("source", path), zap.Error(err))
+		if err := os.Remove(p); err != nil {
+			logger.Get().Errorw("failed to remove a file", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 
@@ -226,7 +228,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 // Handler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
 func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
-	path, err := fs.buildPath(request.Filepath)
+	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
@@ -237,7 +239,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 			return nil, sftp.ErrSshFxPermissionDenied
 		}
 
-		files, err := ioutil.ReadDir(path)
+		files, err := ioutil.ReadDir(p)
 		if err != nil {
 			logger.Get().Error("error listing directory", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
@@ -249,7 +251,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 			return nil, sftp.ErrSshFxPermissionDenied
 		}
 
-		file, err := os.Open(path)
+		file, err := os.Open(p)
 		defer file.Close()
 
 		if err != nil {
@@ -280,15 +282,15 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 func (fs FileSystem) buildPath(rawPath string) (string, error) {
 	// Calling filepath.Clean on the joined directory will resolve it to the absolute path,
 	// removing any ../ type of path resolution, and leaving us with the absolute final path.
-	path := filepath.Clean(filepath.Join(fs.directory, rawPath))
+	p := filepath.Clean(filepath.Join(fs.directory, rawPath))
 
 	// If the new path doesn't start with their root directory there is clearly an escape
 	// attempt going on, and we should NOT resolve this path for them.
-	if !strings.HasPrefix(path, fs.directory) {
+	if !strings.HasPrefix(p, fs.directory) {
 		return "", errors.New("invalid path resolution")
 	}
 
-	return path, nil
+	return p, nil
 }
 
 // Determines if a user has permission to perform a specific action on the SFTP server. These

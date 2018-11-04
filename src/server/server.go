@@ -25,9 +25,10 @@ type AuthenticationRequest struct {
 }
 
 type Settings struct {
-	BasePath string
-	Debug    bool
-	ReadOnly bool
+	BasePath    string
+	ReadOnly    bool
+	BindPort    int
+	BindAddress string
 }
 
 type Configuration struct {
@@ -43,16 +44,6 @@ type AuthenticationResponse struct {
 
 // Initalize the SFTP server and add a persistent listener to handle inbound SFTP connections.
 func (c Configuration) Initalize() error {
-	port, _ := jsonparser.GetString(c.Data, "sftp", "port")
-	if port == "" {
-		port = "2022"
-	}
-
-	ip, _ := jsonparser.GetString(c.Data, "sftp", "ip")
-	if ip == "" {
-		ip = "0.0.0.0"
-	}
-
 	serverConfig := &ssh.ServerConfig{
 		NoClientAuth: false,
 		MaxAuthTries: 6,
@@ -79,7 +70,7 @@ func (c Configuration) Initalize() error {
 	// Add our private key to the server configuration.
 	serverConfig.AddHostKey(private)
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", ip, string(port)))
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", c.Settings.BindAddress, string(c.Settings.BindPort)))
 	if err != nil {
 		return err
 	}
@@ -159,7 +150,7 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 		}
 
 		// Create a new handler for the currently logged in user's server.
-		fs := CreateHandler(base, sconn.Permissions)
+		fs := CreateHandler(base, sconn.Permissions, c.Settings.ReadOnly)
 
 		// Create the server instance for the channel using the filesystem we created above.
 		server := sftp.NewRequestServer(channel, fs)

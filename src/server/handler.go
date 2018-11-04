@@ -44,10 +44,12 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
-	file, err := os.OpenFile(p, os.O_RDONLY, 0644)
-	if err == os.ErrNotExist {
+	if _, err := os.Stat(p); os.IsNotExist(err) {
 		return nil, sftp.ErrSshFxNoSuchFile
-	} else if err != nil {
+	}
+
+	file, err := os.OpenFile(p, os.O_RDONLY, 0644)
+	if err != nil {
 		logger.Get().Errorw("could not open file for reading", zap.String("source", p), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure
 	}
@@ -251,12 +253,13 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 		}
 
 		file, err := os.Open(p)
-		defer file.Close()
-
-		if err != nil {
+		if os.IsNotExist(err) {
+			return nil, sftp.ErrSshFxNoSuchFile
+		} else if err != nil {
 			logger.Get().Error("error opening file for stat", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
+		defer file.Close()
 
 		s, err := file.Stat()
 		if err != nil {

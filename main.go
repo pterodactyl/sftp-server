@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"flag"
+	"github.com/patrickmn/go-cache"
 	"github.com/pterodactyl/sftp-server/src/logger"
 	"github.com/pterodactyl/sftp-server/src/server"
 	"go.uber.org/zap"
 	"io/ioutil"
 	"os"
 	"path"
+	"time"
 )
 
 func main() {
@@ -31,18 +33,22 @@ func main() {
 
 	logger.Get().Infow("reading configuration from path", zap.String("config-path", configLocation))
 
-	c, err := readConfiguration(configLocation)
+	config, err := readConfiguration(configLocation)
 	if err != nil {
 		logger.Get().Fatalw("could not read configuration", zap.Error(err))
 	}
 
+	c := cache.New(5 * time.Minute, 10 * time.Minute)
+
 	var s = server.Configuration{
-		Data: c,
+		Data: config,
+		Cache: c,
 		Settings: server.Settings{
-			BasePath:    path.Dir(configLocation),
-			ReadOnly:    readOnlyMode,
-			BindAddress: bindAddress,
-			BindPort:    bindPort,
+			BasePath:         path.Dir(configLocation),
+			ReadOnly:         readOnlyMode,
+			BindAddress:      bindAddress,
+			BindPort:         bindPort,
+			ServerDataFolder: path.Join(path.Dir(configLocation), "/servers"),
 		},
 	}
 

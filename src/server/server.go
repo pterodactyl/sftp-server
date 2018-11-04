@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/buger/jsonparser"
+	"github.com/patrickmn/go-cache"
 	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
 	"github.com/pterodactyl/sftp-server/src/logger"
@@ -25,14 +26,16 @@ type AuthenticationRequest struct {
 }
 
 type Settings struct {
-	BasePath    string
-	ReadOnly    bool
-	BindPort    int
-	BindAddress string
+	BasePath         string
+	ReadOnly         bool
+	BindPort         int
+	BindAddress      string
+	ServerDataFolder string
 }
 
 type Configuration struct {
 	Data     []byte
+	Cache    *cache.Cache
 	Settings Settings
 }
 
@@ -144,13 +147,8 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 			continue
 		}
 
-		base, err := jsonparser.GetString(c.Data, "sftp", "path")
-		if err != nil || base == "" {
-			base = "/srv/daemon-data"
-		}
-
 		// Create a new handler for the currently logged in user's server.
-		fs := CreateHandler(base, sconn.Permissions, c.Settings.ReadOnly)
+		fs := c.createHandler(sconn.Permissions)
 
 		// Create the server instance for the channel using the filesystem we created above.
 		server := sftp.NewRequestServer(channel, fs)
@@ -160,6 +158,32 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 		} else if err != nil {
 			logger.Get().Errorw("sftp server closed with error", zap.Error(err))
 		}
+	}
+}
+
+// Creates a new SFTP handler for a given server. The directory argument should
+// be the base directory for a server. All actions done on the server will be
+// relative to that directory, and the user will not be able to escape out of it.
+func (c Configuration) createHandler(perm *ssh.Permissions) sftp.Handlers {
+	base, err := jsonparser.GetString(c.Data, "sftp", "path")
+	if err != nil || base == "" {
+		base = "/srv/daemon-data"
+	}
+
+	p := FileSystem{
+		ServerConfig: path.Join(c.Settings.ServerDataFolder, perm.Extensions["uuid"], "server.json"),
+		Directory:    path.Join(base, perm.Extensions["uuid"]),
+		UUID:         perm.Extensions["uuid"],
+		Permissions:  strings.Split(perm.Extensions["permissions"], ","),
+		ReadOnly:     c.Settings.ReadOnly,
+		Cache:        c.Cache,
+	}
+
+	return sftp.Handlers{
+		FileGet:  p,
+		FilePut:  p,
+		FileCmd:  p,
+		FileList: p,
 	}
 }
 

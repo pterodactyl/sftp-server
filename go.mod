@@ -3,6 +3,7 @@ module github.com/pterodactyl/sftp-server
 require (
 	github.com/buger/jsonparser v0.0.0-20181023193515-52c6e1462ebd
 	github.com/kr/fs v0.1.0 // indirect
+	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pkg/errors v0.8.0 // indirect
 	github.com/pkg/sftp v1.8.3
 	github.com/uber-go/zap v1.9.1 // indirect

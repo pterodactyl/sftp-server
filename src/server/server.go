@@ -31,6 +31,7 @@ type Settings struct {
 	BindPort         int
 	BindAddress      string
 	ServerDataFolder string
+	DisableDiskCheck bool
 }
 
 type Configuration struct {
@@ -171,12 +172,13 @@ func (c Configuration) createHandler(perm *ssh.Permissions) sftp.Handlers {
 	}
 
 	p := FileSystem{
-		ServerConfig: path.Join(c.Settings.ServerDataFolder, perm.Extensions["uuid"], "server.json"),
-		Directory:    path.Join(base, perm.Extensions["uuid"]),
-		UUID:         perm.Extensions["uuid"],
-		Permissions:  strings.Split(perm.Extensions["permissions"], ","),
-		ReadOnly:     c.Settings.ReadOnly,
-		Cache:        c.Cache,
+		ServerConfig:     path.Join(c.Settings.ServerDataFolder, perm.Extensions["uuid"], "server.json"),
+		Directory:        path.Join(base, perm.Extensions["uuid"]),
+		UUID:             perm.Extensions["uuid"],
+		Permissions:      strings.Split(perm.Extensions["permissions"], ","),
+		ReadOnly:         c.Settings.ReadOnly,
+		Cache:            c.Cache,
+		DisableDiskCheck: c.Settings.DisableDiskCheck,
 	}
 
 	return sftp.Handlers{

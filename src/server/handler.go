@@ -17,13 +17,14 @@ import (
 )
 
 type FileSystem struct {
-	ServerConfig string
-	Directory    string
-	UUID         string
-	Permissions  []string
-	ReadOnly     bool
-	Cache        *cache.Cache
-	lock         sync.Mutex
+	ServerConfig     string
+	Directory        string
+	UUID             string
+	Permissions      []string
+	ReadOnly         bool
+	DisableDiskCheck bool
+	Cache            *cache.Cache
+	lock             sync.Mutex
 }
 
 // Creates a reader for a file on the system and returns the reader back.
@@ -318,6 +319,15 @@ func (fs FileSystem) can(permission string) bool {
 // Because determining the amount of space being used by a server is a taxing operation we
 // will load it all up into a cache and pull from that as long as the key is not expired.
 func (fs FileSystem) hasSpace() bool {
+	// This is a safety measure to ensure that users who encounter FS related issues can
+	// quickly disable this feature to allow me time to look into what is going wrong and
+	// hopefully address it.
+	//
+	// I get the feeling this might be used sooner rather than later unfortunately...
+	if fs.DisableDiskCheck {
+		return true
+	}
+
 	var space int64 = -2
 	if x, exists := fs.Cache.Get("disk:" + fs.UUID); exists {
 		space = x.(int64)

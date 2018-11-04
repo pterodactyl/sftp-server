@@ -15,17 +15,19 @@ import (
 
 func main() {
 	var (
-		configLocation string
-		bindPort       int
-		bindAddress    string
-		readOnlyMode   bool
-		debugMode      bool
+		configLocation   string
+		bindPort         int
+		bindAddress      string
+		readOnlyMode     bool
+		debugMode        bool
+		disableDiskCheck bool
 	)
 
 	flag.StringVar(&configLocation, "config-path", "./config/core.json", "the location of your Daemon configuration file")
 	flag.IntVar(&bindPort, "port", 2022, "the port this server should bind to")
 	flag.StringVar(&bindAddress, "bind-addr", "0.0.0.0", "the address this server should bind to")
 	flag.BoolVar(&readOnlyMode, "readonly", false, "determines if this server should run in read-only mode")
+	flag.BoolVar(&disableDiskCheck, "disable-disk-check", false, "determines if disk space checking should be disabled")
 	flag.BoolVar(&debugMode, "debug", false, "determines if the server should output debug information")
 	flag.Parse()
 
@@ -38,10 +40,10 @@ func main() {
 		logger.Get().Fatalw("could not read configuration", zap.Error(err))
 	}
 
-	c := cache.New(5 * time.Minute, 10 * time.Minute)
+	c := cache.New(5*time.Minute, 10*time.Minute)
 
 	var s = server.Configuration{
-		Data: config,
+		Data:  config,
 		Cache: c,
 		Settings: server.Settings{
 			BasePath:         path.Dir(configLocation),
@@ -49,6 +51,7 @@ func main() {
 			BindAddress:      bindAddress,
 			BindPort:         bindPort,
 			ServerDataFolder: path.Join(path.Dir(configLocation), "/servers"),
+			DisableDiskCheck: disableDiskCheck,
 		},
 	}
 

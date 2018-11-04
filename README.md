@@ -11,6 +11,32 @@ this poor performance has also caused bottlenecking in the application when it c
 Our goal with the introduction of this standalone server is to provide a lean, performant, fully-featured SFTP server
 that will hold up the the demands placed upon it.
 
+## Running
+To run this program in a standalone mode (rather than booted by the Daemon), use the arguments below.
+
+```
+./sftp-server [--config-path] [--port] [--bind-addr] [--readonly] [--disable-disk-check] [--debug]
+```
+
+### Flags
+```
+flag          default            help
+--config-path       ./config/core.json This flag defines the location of the Daemon configuration file which
+                                       is read to help determine some internal settings.
+
+--port               2022              The port for the SFTP server.
+
+--bind-addr          0.0.0.0           The bind address for the SFTP server.
+
+--readonly           false             If provided, the server will run in a read-only state that denies anyone,
+                                       regardless of permission, from writing or modifying files.
+
+--disable-disk-check false             If passed, disk space usage will be disabled.
+
+--debug              false             If passed, the server will run in debug mode which can be useful for printing
+                                       stacktraces and additional connection and error information.
+```
+
 ## License
 Like all of our software, this server is provided under the MIT license.
 

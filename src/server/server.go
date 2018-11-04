@@ -41,6 +41,7 @@ type AuthenticationResponse struct {
 	Permissions []string `json:"permissions"`
 }
 
+// Initalize the SFTP server and add a persistent listener to handle inbound SFTP connections.
 func (c Configuration) Initalize() error {
 	port, _ := jsonparser.GetString(c.Data, "sftp", "port")
 	if port == "" {
@@ -204,6 +205,14 @@ func (c Configuration) validateCredentials(user string, pass []byte) (*ssh.Permi
 
 	if resp.StatusCode != http.StatusOK {
 		s, _ := ioutil.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("bad credentials provided: %s", string(s))
+		}
+
+		if resp.StatusCode == http.StatusBadRequest {
+			return nil, fmt.Errorf("server in bad state, SFTP denied, %s", string(s))
+		}
+
 		return nil, fmt.Errorf("error response from server: %s", string(s))
 	}
 

@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"strings"
+	"time"
 )
 
 type AuthenticationRequest struct {
@@ -31,6 +33,12 @@ type Settings struct {
 type Configuration struct {
 	Data     []byte
 	Settings Settings
+}
+
+type AuthenticationResponse struct {
+	Server      string   `json:"server"`
+	Token       string   `json:"token"`
+	Permissions []string `json:"permissions"`
 }
 
 func (c Configuration) Initalize() error {
@@ -187,35 +195,26 @@ func (c Configuration) validateCredentials(user string, pass []byte) (*ssh.Permi
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-
 	defer resp.Body.Close()
-	body, _ := ioutil.ReadAll(resp.Body)
 
-	if resp.StatusCode != 200 {
-		// this is tragic, need to update the panel code to not do this at some point.
-		e, _ := jsonparser.GetString(body, "error")
-		es, _ := jsonparser.GetString(body, "errors")
-		if e != "" || len(es) != 0 {
-			return nil, fmt.Errorf("error response from server: %s", e)
-		}
-
-		return nil, errors.New("bad response from authentication server")
+	if resp.StatusCode != http.StatusOK {
+		s, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("error response from server: %s", string(s))
 	}
 
-	server, err := jsonparser.GetString(body, "server")
-	if err != nil {
-		return nil, err
-	}
+	j := &AuthenticationResponse{}
+	json.NewDecoder(resp.Body).Decode(j)
 
 	p := &ssh.Permissions{}
 	p.Extensions = make(map[string]string)
-	p.Extensions["uuid"] = server
+	p.Extensions["uuid"] = j.Server
 	p.Extensions["user"] = user
+	p.Extensions["permissions"] = strings.Join(j.Permissions, ",")
 
 	return p, nil
 }

@@ -252,18 +252,11 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 			return nil, sftp.ErrSshFxPermissionDenied
 		}
 
-		file, err := os.Open(p)
+		s, err := os.Stat(p)
 		if os.IsNotExist(err) {
 			return nil, sftp.ErrSshFxNoSuchFile
 		} else if err != nil {
-			logger.Get().Error("error opening file for stat", zap.Error(err))
-			return nil, sftp.ErrSshFxFailure
-		}
-		defer file.Close()
-
-		s, err := file.Stat()
-		if err != nil {
-			logger.Get().Error("error statting file", zap.Error(err))
+			logger.Get().Error("error running STAT on file", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 

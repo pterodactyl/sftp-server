@@ -3,7 +3,7 @@ This package serves as a SFTP server to run alongside the [Pterodactyl Daemon](h
 It is not designed to run stand-alone on your system.
 
 ## Why?
-Previously we made use of Nodejs to handle running our SFTP server for the Daemon. While this worked, and has allowed us
+Previously we made use of Node.js to handle running our SFTP server for the Daemon. While this worked, and has allowed us
 to provide more advanced permissions and keep things off the host OS, it has also lead to many issues. Most notably has
 been extremely poor performance when trying to work with directories containing hundreds or thousands of files. In addition,
 this poor performance has also caused bottlenecking in the application when it comes to managing servers.

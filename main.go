@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"github.com/buger/jsonparser"
 	"github.com/patrickmn/go-cache"
 	"github.com/pterodactyl/sftp-server/src/logger"
 	"github.com/pterodactyl/sftp-server/src/server"
@@ -40,11 +41,18 @@ func main() {
 		logger.Get().Fatalw("could not read configuration", zap.Error(err))
 	}
 
+	u, err := jsonparser.GetInt(config, "docker", "container", "user")
+	if err != nil {
+		logger.Get().Fatalw("could not locate SFTP base user", zap.Error(err))
+		return
+	}
+
 	c := cache.New(5*time.Minute, 10*time.Minute)
 
 	var s = server.Configuration{
 		Data:  config,
 		Cache: c,
+		User:  int(u),
 		Settings: server.Settings{
 			BasePath:         path.Dir(configLocation),
 			ReadOnly:         readOnlyMode,

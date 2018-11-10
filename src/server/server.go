@@ -43,6 +43,7 @@ type Configuration struct {
 	Data     []byte
 	Cache    *cache.Cache
 	Settings Settings
+	User     int
 }
 
 type AuthenticationResponse struct {
@@ -66,12 +67,13 @@ func (c Configuration) Initalize() error {
 		},
 	}
 
-	_, err := os.Stat(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(path.Join(c.Settings.BasePath, ".sftp/id_rsa")); os.IsNotExist(err) {
 		logger.Get().Info("creating new private key for server")
 		if err := c.generatePrivateKey(); err != nil {
 			return err
 		}
+	} else if err != nil {
+		return err
 	}
 
 	privateBytes, err := ioutil.ReadFile(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
@@ -194,6 +196,7 @@ func (c Configuration) createHandler(perm *ssh.Permissions) sftp.Handlers {
 		ReadOnly:         c.Settings.ReadOnly,
 		Cache:            c.Cache,
 		DisableDiskCheck: c.Settings.DisableDiskCheck,
+		User:             c.User,
 	}
 
 	return sftp.Handlers{
@@ -271,7 +274,7 @@ func (c Configuration) generatePrivateKey() error {
 		return err
 	}
 
-	o, err := os.Create(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
+	o, err := os.OpenFile(path.Join(c.Settings.BasePath, ".sftp/id_rsa"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}

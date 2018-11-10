@@ -23,6 +23,7 @@ type FileSystem struct {
 	Permissions      []string
 	ReadOnly         bool
 	DisableDiskCheck bool
+	User             int
 	Cache            *cache.Cache
 	lock             sync.Mutex
 }
@@ -103,6 +104,12 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 			return nil, sftp.ErrSshFxFailure
 		}
 
+		// Not failing here is intentional. We still made the file, it is just owned incorrectly
+		// and will likely cause some issues.
+		if err := os.Chown(p, fs.User, fs.User); err != nil {
+			logger.Get().Warnw("error chowning file", zap.String("file", p), zap.Error(err))
+		}
+
 		return file, nil
 	} else if err != nil {
 		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(err))
@@ -126,6 +133,12 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 			zap.Error(err),
 		)
 		return nil, sftp.ErrSshFxFailure
+	}
+
+	// Not failing here is intentional. We still made the file, it is just owned incorrectly
+	// and will likely cause some issues.
+	if err := os.Chown(p, fs.User, fs.User); err != nil {
+		logger.Get().Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 	}
 
 	return file, nil
@@ -175,7 +188,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		return sftp.ErrSshFxOk
+		break
 	case "Rmdir":
 		if !fs.can("delete-files") {
 			return sftp.ErrSshFxPermissionDenied
@@ -186,7 +199,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		return sftp.ErrSshFxOk
+		break
 	case "Mkdir":
 		if !fs.can("create-files") {
 			return sftp.ErrSshFxPermissionDenied
@@ -197,7 +210,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		return sftp.ErrSshFxOk
+		break
 	case "Symlink":
 		if !fs.can("create-files") {
 			return sftp.ErrSshFxPermissionDenied
@@ -212,7 +225,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		return sftp.ErrSshFxOk
+		break
 	case "Remove":
 		if !fs.can("delete-files") {
 			return sftp.ErrSshFxPermissionDenied
@@ -227,6 +240,19 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	default:
 		return sftp.ErrSshFxOpUnsupported
 	}
+
+	var fileLocation = p
+	if target != "" {
+		fileLocation = target
+	}
+
+	// Not failing here is intentional. We still made the file, it is just owned incorrectly
+	// and will likely cause some issues.
+	if err := os.Chown(fileLocation, fs.User, fs.User); err != nil {
+		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
+	}
+
+	return sftp.ErrSshFxOk
 }
 
 // Handler for SFTP filesystem list calls. This will handle calls to list the contents of

@@ -39,11 +39,16 @@ type Settings struct {
 	DisableDiskCheck bool
 }
 
+type SftpUser struct {
+	Uid int
+	Gid int
+}
+
 type Configuration struct {
 	Data     []byte
 	Cache    *cache.Cache
 	Settings Settings
-	User     int
+	User     SftpUser
 }
 
 type AuthenticationResponse struct {

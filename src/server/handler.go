@@ -23,7 +23,7 @@ type FileSystem struct {
 	Permissions      []string
 	ReadOnly         bool
 	DisableDiskCheck bool
-	User             int
+	User             SftpUser
 	Cache            *cache.Cache
 	lock             sync.Mutex
 }
@@ -72,6 +72,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// If the user doesn't have enough space left on the server it should respond with an
 	// error since we won't be letting them write this file to the disk.
 	if !fs.hasSpace() {
+		logger.Get().Infow("denying file write due to space limit", zap.String("server", fs.UUID))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -106,7 +107,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 		// Not failing here is intentional. We still made the file, it is just owned incorrectly
 		// and will likely cause some issues.
-		if err := os.Chown(p, fs.User, fs.User); err != nil {
+		if err := os.Chown(p, fs.User.Uid, fs.User.Gid); err != nil {
 			logger.Get().Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 		}
 
@@ -137,7 +138,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues.
-	if err := os.Chown(p, fs.User, fs.User); err != nil {
+	if err := os.Chown(p, fs.User.Uid, fs.User.Gid); err != nil {
 		logger.Get().Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 	}
 
@@ -248,7 +249,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues.
-	if err := os.Chown(fileLocation, fs.User, fs.User); err != nil {
+	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
 		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
 	}
 

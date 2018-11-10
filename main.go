@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"github.com/buger/jsonparser"
 	"github.com/patrickmn/go-cache"
 	"github.com/pterodactyl/sftp-server/src/logger"
@@ -10,11 +11,19 @@ import (
 	"go.uber.org/zap"
 	"io/ioutil"
 	"os"
+	"os/user"
 	"path"
+	"runtime"
+	"strconv"
 	"time"
 )
 
 func main() {
+	if runtime.GOOS != "linux" {
+		fmt.Printf("This operating system (%s) is not supported.\n", runtime.GOOS)
+		os.Exit(1)
+	}
+
 	var (
 		configLocation   string
 		bindPort         int
@@ -41,18 +50,30 @@ func main() {
 		logger.Get().Fatalw("could not read configuration", zap.Error(err))
 	}
 
-	u, err := jsonparser.GetInt(config, "docker", "container", "user")
+	username, err := jsonparser.GetString(config, "docker", "container", "username")
 	if err != nil {
-		logger.Get().Fatalw("could not locate SFTP base user", zap.Error(err))
+		logger.Get().Debugw("could not find sftp user definition, falling back to \"pterodactyl\"", zap.Error(err))
+		username = "pterodactyl"
+	}
+
+	logger.Get().Infow("using system daemon user", zap.String("username", username))
+
+	u, err := user.Lookup(username)
+	if err != nil {
+		logger.Get().Fatalw("failed to lookup sftp user", zap.Error(err))
 		return
 	}
 
-	c := cache.New(5*time.Minute, 10*time.Minute)
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
 
 	var s = server.Configuration{
 		Data:  config,
-		Cache: c,
-		User:  int(u),
+		Cache: cache.New(5*time.Minute, 10*time.Minute),
+		User:  server.SftpUser{
+			Uid: uid,
+			Gid: gid,
+		},
 		Settings: server.Settings{
 			BasePath:         path.Dir(configLocation),
 			ReadOnly:         readOnlyMode,

@@ -99,7 +99,8 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 	// Before beginning a handshake must be performed on the incoming net.Conn
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
-		logger.Get().Error("failed to accept an incoming connection", zap.Error(err))
+		logger.Get().Warnw("failed to accept an incoming connection", zap.Error(err))
+		return
 	}
 	defer sconn.Close()
 
@@ -123,6 +124,7 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 		channel, requests, err := newChannel.Accept()
 		if err != nil {
 			logger.Get().Warnw("could not accept a channel", zap.Error(err))
+			continue
 		}
 
 		// Channels have a type that is dependent on the protocol. For SFTP this is "subsystem"

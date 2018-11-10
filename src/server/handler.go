@@ -155,9 +155,12 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	}
 
 	switch request.Method {
-	// Need to add this in eventually, should work similarly to the current daemon.
-	case "SetStat", "Setstat":
-		return sftp.ErrSshFxOpUnsupported
+	case "Setstat":
+		if err := os.Chmod(p, request.Attributes().FileMode()); err != nil {
+			logger.Get().Errorw("failed to perform setstat", zap.Error(err))
+			return sftp.ErrSshFxFailure
+		}
+		return nil
 	case "Rename":
 		if !fs.can("move-files") {
 			return sftp.ErrSshFxPermissionDenied

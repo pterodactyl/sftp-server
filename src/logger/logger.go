@@ -2,28 +2,33 @@ package logger
 
 import (
 	"go.uber.org/zap"
+	"os"
 )
 
 var sugar *zap.SugaredLogger
 
 // Creates a logger instance.
 func Initialize(debug bool) (error) {
-	var logger *zap.Logger
-	var err error
-
+	var cfg = zap.Config{}
 	if debug {
-		logger, err = zap.NewDevelopment()
+		cfg = zap.NewDevelopmentConfig()
 	} else {
-		logger, err = zap.NewProduction()
+		cfg = zap.NewProductionConfig()
 	}
 
+	cfg.Encoding = "console"
+	cfg.OutputPaths = []string{
+		os.Stdout.Name(),
+		"./sftp-server.log",
+	}
+
+	logger, err := cfg.Build()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync()
 
 	sugar = logger.Sugar()
-
 	return nil
 }
 

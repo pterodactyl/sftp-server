@@ -2,7 +2,11 @@ package server
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"github.com/buger/jsonparser"
 	"github.com/patrickmn/go-cache"
@@ -15,6 +19,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -59,6 +64,14 @@ func (c Configuration) Initalize() error {
 
 			return sp, nil
 		},
+	}
+
+	_, err := os.Stat(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
+	if os.IsNotExist(err) {
+		logger.Get().Info("creating new private key for server")
+		if err := c.generatePrivateKey(); err != nil {
+			return err
+		}
 	}
 
 	privateBytes, err := ioutil.ReadFile(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
@@ -245,4 +258,33 @@ func (c Configuration) validateCredentials(user string, pass []byte) (*ssh.Permi
 	p.Extensions["permissions"] = strings.Join(j.Permissions, ",")
 
 	return p, nil
+}
+
+// Generates a private key that will be used by the SFTP server.
+func (c Configuration) generatePrivateKey() error {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(path.Join(c.Settings.BasePath, ".sftp"), 0755); err != nil {
+		return err
+	}
+
+	o, err := os.Create(path.Join(c.Settings.BasePath, ".sftp/id_rsa"))
+	if err != nil {
+		return err
+	}
+	defer o.Close()
+
+	pkey := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}
+
+	if err := pem.Encode(o, pkey); err != nil {
+		return err
+	}
+
+	return nil
 }

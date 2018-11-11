@@ -2,7 +2,6 @@ package logger
 
 import (
 	"go.uber.org/zap"
-	"os"
 )
 
 var sugar *zap.SugaredLogger
@@ -18,7 +17,7 @@ func Initialize(debug bool) (error) {
 
 	cfg.Encoding = "console"
 	cfg.OutputPaths = []string{
-		os.Stdout.Name(),
+		"stdout",
 		"./sftp-server.log",
 	}
 

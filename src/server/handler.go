@@ -168,6 +168,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 	}
 
+	isRemoval := false
 	switch request.Method {
 	case "Setstat":
 		if err := os.Chmod(p, request.Attributes().FileMode()); err != nil {
@@ -199,6 +200,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			logger.Get().Errorw("failed to remove directory", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
+
+		isRemoval = true
 
 		break
 	case "Mkdir":
@@ -237,6 +240,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
+		isRemoval = true
+
 		return sftp.ErrSshFxOk
 	default:
 		return sftp.ErrSshFxOpUnsupported
@@ -249,8 +254,10 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues.
-	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
-		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
+	if !isRemoval { // We can't perform a chown on a file that has been removed
+		if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
+			logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
+		}
 	}
 
 	return sftp.ErrSshFxOk

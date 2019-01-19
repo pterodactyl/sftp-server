@@ -80,6 +80,8 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	defer fs.lock.Unlock()
 
 	_, statErr := os.Stat(p)
+
+
 	// If the file doesn't exist we need to create it, as well as the directory pathway
 	// leading up to where that file will be created.
 	if os.IsNotExist(statErr) {
@@ -126,7 +128,15 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
-	file, err := os.OpenFile(p, int(request.Flags), 0644)
+	if os.IsNotExist(statErr) {
+
+	} else {
+		if err := os.Remove(p); err != nil {
+			logger.Get().Warnw("error deleting creation file", zap.String("file", p), zap.Error(err))
+		}
+	}
+
+	file, err := os.Create(p)
 	if err != nil {
 		logger.Get().Errorw("error writing to existing file",
 			zap.Uint32("flags", request.Flags),
@@ -168,9 +178,10 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 	}
 
+	isRemoval := false
 	switch request.Method {
 	case "Setstat":
-		if err := os.Chmod(p, request.Attributes().FileMode()); err != nil {
+		if err := os.Chmod(p, 0755); err != nil {
 			logger.Get().Errorw("failed to perform setstat", zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
@@ -199,6 +210,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			logger.Get().Errorw("failed to remove directory", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
+
+		isRemoval = true
 
 		break
 	case "Mkdir":
@@ -237,6 +250,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
+		isRemoval = true
+
 		return sftp.ErrSshFxOk
 	default:
 		return sftp.ErrSshFxOpUnsupported
@@ -249,8 +264,10 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues.
-	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
-		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
+	if !isRemoval { // We can't perform a chown on a file that has been removed
+		if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
+			logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
+		}
 	}
 
 	return sftp.ErrSshFxOk

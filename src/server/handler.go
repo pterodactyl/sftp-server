@@ -80,8 +80,6 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	defer fs.lock.Unlock()
 
 	_, statErr := os.Stat(p)
-
-
 	// If the file doesn't exist we need to create it, as well as the directory pathway
 	// leading up to where that file will be created.
 	if os.IsNotExist(statErr) {
@@ -114,8 +112,12 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		}
 
 		return file, nil
-	} else if err != nil {
-		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(err))
+	}
+
+	// If the stat error isn't about the file not existing, there is some other issue
+	// at play and we need to go ahead and bail out of the process.
+	if statErr != nil {
+		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(statErr))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -126,14 +128,6 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// But first, check that the user has permission to save modified files.
 	if !fs.can("save-files") {
 		return nil, sftp.ErrSshFxPermissionDenied
-	}
-
-	if os.IsNotExist(statErr) {
-
-	} else {
-		if err := os.Remove(p); err != nil {
-			logger.Get().Warnw("error deleting creation file", zap.String("file", p), zap.Error(err))
-		}
 	}
 
 	file, err := os.Create(p)

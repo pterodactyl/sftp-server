@@ -49,7 +49,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
 
-	file, err := os.OpenFile(p, os.O_RDONLY, 0644)
+	file, err := os.Open(p)
 	if err != nil {
 		logger.Get().Errorw("could not open file for reading", zap.String("source", p), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure
@@ -79,7 +79,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
-	_, statErr := os.Stat(p)
+	stat, statErr := os.Stat(p)
 	// If the file doesn't exist we need to create it, as well as the directory pathway
 	// leading up to where that file will be created.
 	if os.IsNotExist(statErr) {
@@ -112,8 +112,12 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		}
 
 		return file, nil
-	} else if err != nil {
-		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(err))
+	}
+
+	// If the stat error isn't about the file not existing, there is some other issue
+	// at play and we need to go ahead and bail out of the process.
+	if statErr != nil {
+		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(statErr))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -126,9 +130,15 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
-	file, err := os.OpenFile(p, int(request.Flags), 0644)
+	// Not sure this would ever happen, but lets not find out.
+	if stat.IsDir() {
+		logger.Get().Warnw("attempted to open a directory for writing to", zap.String("source", p))
+		return nil, sftp.ErrSshFxOpUnsupported
+	}
+
+	file, err := os.Create(p)
 	if err != nil {
-		logger.Get().Errorw("error writing to existing file",
+		logger.Get().Errorw("error opening existing file",
 			zap.Uint32("flags", request.Flags),
 			zap.String("source", p),
 			zap.Error(err),
@@ -170,7 +180,12 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	switch request.Method {
 	case "Setstat":
-		if err := os.Chmod(p, request.Attributes().FileMode()); err != nil {
+		var mode os.FileMode = 0644
+		if request.Attributes().FileMode().IsDir() {
+			mode = 0755
+		}
+
+		if err := os.Chmod(p, mode); err != nil {
 			logger.Get().Errorw("failed to perform setstat", zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
@@ -200,7 +215,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		break
+		return sftp.ErrSshFxOk
 	case "Mkdir":
 		if !fs.can("create-files") {
 			return sftp.ErrSshFxPermissionDenied
@@ -248,7 +263,8 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	}
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
-	// and will likely cause some issues.
+	// and will likely cause some issues. There is no logical check for if the file was removed
+	// because both of those cases (Rmdir, Remove) have an explicit return rather than break.
 	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
 		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
 	}

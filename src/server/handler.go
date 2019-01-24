@@ -79,7 +79,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
-	_, statErr := os.Stat(p)
+	stat, statErr := os.Stat(p)
 	// If the file doesn't exist we need to create it, as well as the directory pathway
 	// leading up to where that file will be created.
 	if os.IsNotExist(statErr) {
@@ -128,6 +128,12 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// But first, check that the user has permission to save modified files.
 	if !fs.can("save-files") {
 		return nil, sftp.ErrSshFxPermissionDenied
+	}
+
+	// Not sure this would ever happen, but lets not find out.
+	if stat.IsDir() {
+		logger.Get().Warnw("attempted to open a directory for writing to", zap.String("source", p))
+		return nil, sftp.ErrSshFxOpUnsupported
 	}
 
 	file, err := os.OpenFile(p, int(request.Flags), 0644)

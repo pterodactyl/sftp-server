@@ -49,7 +49,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
 
-	file, err := os.OpenFile(p, os.O_RDONLY, 0644)
+	file, err := os.Open(p)
 	if err != nil {
 		logger.Get().Errorw("could not open file for reading", zap.String("source", p), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure

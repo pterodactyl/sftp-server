@@ -136,7 +136,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxOpUnsupported
 	}
 
-	file, err := os.OpenFile(p, int(request.Flags), 0644)
+	file, err := os.Create(p)
 	if err != nil {
 		logger.Get().Errorw("error opening existing file",
 			zap.Uint32("flags", request.Flags),

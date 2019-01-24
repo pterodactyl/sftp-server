@@ -99,9 +99,9 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 			return nil, sftp.ErrSshFxFailure
 		}
 
-		file, err := os.OpenFile(p, int(request.Flags), 0644)
+		file, err := os.Create(p)
 		if err != nil {
-			logger.Get().Errorw("error opening file for write", zap.String("source", p), zap.Error(err))
+			logger.Get().Errorw("error creating file", zap.String("source", p), zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 
@@ -130,9 +130,9 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
-	file, err := os.Create(p)
+	file, err := os.OpenFile(p, int(request.Flags), 0644)
 	if err != nil {
-		logger.Get().Errorw("error writing to existing file",
+		logger.Get().Errorw("error opening existing file",
 			zap.Uint32("flags", request.Flags),
 			zap.String("source", p),
 			zap.Error(err),

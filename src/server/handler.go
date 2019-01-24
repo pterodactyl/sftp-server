@@ -174,7 +174,12 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	switch request.Method {
 	case "Setstat":
-		if err := os.Chmod(p, 0755); err != nil {
+		var mode os.FileMode = 0644
+		if request.Attributes().FileMode().IsDir() {
+			mode = 0755
+		}
+
+		if err := os.Chmod(p, mode); err != nil {
 			logger.Get().Errorw("failed to perform setstat", zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}

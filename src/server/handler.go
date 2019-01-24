@@ -172,7 +172,6 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 	}
 
-	isRemoval := false
 	switch request.Method {
 	case "Setstat":
 		if err := os.Chmod(p, 0755); err != nil {
@@ -205,9 +204,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		isRemoval = true
-
-		break
+		return sftp.ErrSshFxOk
 	case "Mkdir":
 		if !fs.can("create-files") {
 			return sftp.ErrSshFxPermissionDenied
@@ -244,8 +241,6 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 			return sftp.ErrSshFxFailure
 		}
 
-		isRemoval = true
-
 		return sftp.ErrSshFxOk
 	default:
 		return sftp.ErrSshFxOpUnsupported
@@ -257,11 +252,10 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	}
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
-	// and will likely cause some issues.
-	if !isRemoval { // We can't perform a chown on a file that has been removed
-		if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
-			logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
-		}
+	// and will likely cause some issues. There is no logical check for if the file was removed
+	// because both of those cases (Rmdir, Remove) have an explicit return rather than break.
+	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
+		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
 	}
 
 	return sftp.ErrSshFxOk

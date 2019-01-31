@@ -333,22 +333,26 @@ func (fs FileSystem) buildPath(rawPath string) (string, error) {
 	// removing any ../ type of path resolution, and leaving us with the absolute final path.
 	p := filepath.Clean(filepath.Join(fs.Directory, rawPath))
 
-	if _, err := os.Stat(p); os.IsExist(err) {
-		symfile, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			return "", errors.New("Error Evaluatin Symlink Path")
-		}
-
-		dir, _ := path.Split(p)
-
-		if !strings.Contains(symfile, dir) {
-			return "", errors.New("invalid path resolution")
-		}
-	}
-
 	// If the new path doesn't start with their root directory there is clearly an escape
 	// attempt going on, and we should NOT resolve this path for them.
 	if !strings.HasPrefix(p, fs.Directory) {
+		return "", errors.New("invalid path resolution")
+	}
+
+	// If the file doesn't exist pass the path back.
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		return p, nil
+	}
+
+	// Check if the path is in the server directory and return a no if it isn't.
+	symfile, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", errors.New("Error Evaluating Symlink Path")
+	}
+
+	dir, _ := path.Split(p)
+
+	if !strings.Contains(symfile, dir) {
 		return "", errors.New("invalid path resolution")
 	}
 

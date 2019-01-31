@@ -1,12 +1,6 @@
 package server
 
 import (
-	"github.com/buger/jsonparser"
-	"github.com/patrickmn/go-cache"
-	"github.com/pkg/errors"
-	"github.com/pkg/sftp"
-	"github.com/pterodactyl/sftp-server/src/logger"
-	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,6 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/buger/jsonparser"
+	cache "github.com/patrickmn/go-cache"
+	"github.com/pkg/errors"
+	"github.com/pkg/sftp"
+	"github.com/pterodactyl/sftp-server/src/logger"
+	"go.uber.org/zap"
 )
 
 type FileSystem struct {
@@ -28,7 +29,7 @@ type FileSystem struct {
 	lock             sync.Mutex
 }
 
-// Creates a reader for a file on the system and returns the reader back.
+// Fileread creates a reader for a file on the system and returns the reader back.
 func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	// Check first if the user can actually open and view a file. This permission is named
 	// really poorly, but it is checking if they can read. There is an addition permission,
@@ -40,6 +41,17 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
+	}
+
+	symfile, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return nil, sftp.ErrSshFxOpUnsupported
+	}
+
+	dir, _ := path.Split(p)
+
+	if !strings.Contains(symfile, dir) {
+		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
 	fs.lock.Lock()
@@ -58,7 +70,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	return file, nil
 }
 
-// Handle a write action for a file on the system.
+// Filewrite handles the write actions for a file on the system.
 func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	if fs.ReadOnly {
 		return nil, sftp.ErrSshFxOpUnsupported
@@ -67,6 +79,17 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
+	}
+
+	symfile, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return nil, sftp.ErrSshFxOpUnsupported
+	}
+
+	dir, _ := path.Split(p)
+
+	if !strings.Contains(symfile, dir) {
+		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
 	// If the user doesn't have enough space left on the server it should respond with an
@@ -155,7 +178,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	return file, nil
 }
 
-// Hander for basic SFTP system calls related to files, but not anything to do with reading
+// Filecmd hander for basic SFTP system calls related to files, but not anything to do with reading
 // or writing to those files.
 func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	if fs.ReadOnly {
@@ -165,6 +188,17 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return sftp.ErrSshFxNoSuchFile
+	}
+
+	symfile, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return sftp.ErrSshFxOpUnsupported
+	}
+
+	dir, _ := path.Split(p)
+
+	if !strings.Contains(symfile, dir) {
+		return sftp.ErrSshFxPermissionDenied
 	}
 
 	var target string
@@ -180,7 +214,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	switch request.Method {
 	case "Setstat":
-		var mode os.FileMode = 0644
+		var mode os.FileMode = request.Attributes().FileMode().Perm()
 		if request.Attributes().FileMode().IsDir() {
 			mode = 0755
 		}
@@ -272,7 +306,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	return sftp.ErrSshFxOk
 }
 
-// Handler for SFTP filesystem list calls. This will handle calls to list the contents of
+// Filelist is the andler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
 func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 	p, err := fs.buildPath(request.Filepath)
@@ -290,6 +324,21 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 		if err != nil {
 			logger.Get().Error("error listing directory", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
+		}
+
+		for i, file := range files {
+			if file.Mode()&os.ModeType == os.ModeSymlink {
+
+				symfile, err := filepath.EvalSymlinks(p + "/" + file.Name())
+				if err != nil {
+					return nil, sftp.ErrSshFxOpUnsupported
+				}
+
+				if !strings.Contains(symfile, p) {
+					logger.Get().Debugw("File "+file.Name()+"is a symlink. Dropping file from filelist", zap.String("file", file.Name()))
+					files = append(files[:i], files[i+1:]...)
+				}
+			}
 		}
 
 		return ListerAt(files), nil

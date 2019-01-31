@@ -81,15 +81,17 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
 
-	symfile, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return nil, sftp.ErrSshFxOpUnsupported
-	}
+	if _, err := os.Stat(p); os.IsExist(err) {
+		symfile, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			return nil, sftp.ErrSshFxOpUnsupported
+		}
 
-	dir, _ := path.Split(p)
+		dir, _ := path.Split(p)
 
-	if !strings.Contains(symfile, dir) {
-		return nil, sftp.ErrSshFxPermissionDenied
+		if !strings.Contains(symfile, dir) {
+			return nil, sftp.ErrSshFxPermissionDenied
+		}
 	}
 
 	// If the user doesn't have enough space left on the server it should respond with an
@@ -324,21 +326,6 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 		if err != nil {
 			logger.Get().Error("error listing directory", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
-		}
-
-		for i, file := range files {
-			if file.Mode()&os.ModeType == os.ModeSymlink {
-
-				symfile, err := filepath.EvalSymlinks(p + "/" + file.Name())
-				if err != nil {
-					return nil, sftp.ErrSshFxOpUnsupported
-				}
-
-				if !strings.Contains(symfile, p) {
-					logger.Get().Debugw("File "+file.Name()+"is a symlink. Dropping file from filelist", zap.String("file", file.Name()))
-					files = append(files[:i], files[i+1:]...)
-				}
-			}
 		}
 
 		return ListerAt(files), nil

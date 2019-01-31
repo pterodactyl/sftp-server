@@ -43,17 +43,6 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 		return nil, sftp.ErrSshFxNoSuchFile
 	}
 
-	symfile, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return nil, sftp.ErrSshFxOpUnsupported
-	}
-
-	dir, _ := path.Split(p)
-
-	if !strings.Contains(symfile, dir) {
-		return nil, sftp.ErrSshFxPermissionDenied
-	}
-
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
@@ -79,19 +68,6 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
-	}
-
-	if _, err := os.Stat(p); os.IsExist(err) {
-		symfile, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			return nil, sftp.ErrSshFxOpUnsupported
-		}
-
-		dir, _ := path.Split(p)
-
-		if !strings.Contains(symfile, dir) {
-			return nil, sftp.ErrSshFxPermissionDenied
-		}
 	}
 
 	// If the user doesn't have enough space left on the server it should respond with an
@@ -192,17 +168,6 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		return sftp.ErrSshFxNoSuchFile
 	}
 
-	symfile, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return sftp.ErrSshFxOpUnsupported
-	}
-
-	dir, _ := path.Split(p)
-
-	if !strings.Contains(symfile, dir) {
-		return sftp.ErrSshFxPermissionDenied
-	}
-
 	var target string
 	// If a target is provided in this request validate that it is going to the correct
 	// location for the server. If it is not, return an operation unsupported error. This
@@ -216,7 +181,14 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	switch request.Method {
 	case "Setstat":
-		var mode os.FileMode = request.Attributes().FileMode().Perm()
+		var mode os.FileMode
+
+		if request.Attributes().FileMode().Perm() != 0000 {
+			mode = request.Attributes().FileMode().Perm()
+		} else {
+			mode = 0644
+		}
+
 		if request.Attributes().FileMode().IsDir() {
 			mode = 0755
 		}
@@ -360,6 +332,19 @@ func (fs FileSystem) buildPath(rawPath string) (string, error) {
 	// Calling filepath.Clean on the joined directory will resolve it to the absolute path,
 	// removing any ../ type of path resolution, and leaving us with the absolute final path.
 	p := filepath.Clean(filepath.Join(fs.Directory, rawPath))
+
+	if _, err := os.Stat(p); os.IsExist(err) {
+		symfile, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			return "", errors.New("Error Evaluatin Symlink Path")
+		}
+
+		dir, _ := path.Split(p)
+
+		if !strings.Contains(symfile, dir) {
+			return "", errors.New("invalid path resolution")
+		}
+	}
 
 	// If the new path doesn't start with their root directory there is clearly an escape
 	// attempt going on, and we should NOT resolve this path for them.

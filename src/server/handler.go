@@ -280,7 +280,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	return sftp.ErrSshFxOk
 }
 
-// Filelist is the andler for SFTP filesystem list calls. This will handle calls to list the contents of
+// Filelist is the handler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
 func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 	p, err := fs.buildPath(request.Filepath)
@@ -347,7 +347,7 @@ func (fs FileSystem) buildPath(rawPath string) (string, error) {
 	// Check if the path is in the server directory and return a no if it isn't.
 	symfile, err := filepath.EvalSymlinks(p)
 	if err != nil {
-		return "", errors.New("Error Evaluating Symlink Path")
+		return "", errors.New("error evaluating symlink path")
 	}
 
 	dir, _ := path.Split(p)

@@ -3,11 +3,9 @@ This file is a running track of new features and fixes to each version of the da
 
 ## v1.0.3
 
-### New Feature
-* Change Log
+### Added
+    * Change Log
 
-### Bug Fixes
-* Can properly set file permissions via sftp now.
-
-### Security
-* Fixes an unauthorized file read outside of server directory vulnerability when working with the standalone SFTP server. 
+### Fixed
+    * Can properly set file permissions via sftp now.
+    * [Security] Fixes an unauthorized file read outside of server directory vulnerability when working with the standalone SFTP server.

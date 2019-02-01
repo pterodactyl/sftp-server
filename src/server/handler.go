@@ -1,12 +1,6 @@
 package server
 
 import (
-	"github.com/buger/jsonparser"
-	"github.com/patrickmn/go-cache"
-	"github.com/pkg/errors"
-	"github.com/pkg/sftp"
-	"github.com/pterodactyl/sftp-server/src/logger"
-	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,6 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/buger/jsonparser"
+	cache "github.com/patrickmn/go-cache"
+	"github.com/pkg/errors"
+	"github.com/pkg/sftp"
+	"github.com/pterodactyl/sftp-server/src/logger"
+	"go.uber.org/zap"
 )
 
 type FileSystem struct {
@@ -28,7 +29,7 @@ type FileSystem struct {
 	lock             sync.Mutex
 }
 
-// Creates a reader for a file on the system and returns the reader back.
+// Fileread creates a reader for a file on the system and returns the reader back.
 func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	// Check first if the user can actually open and view a file. This permission is named
 	// really poorly, but it is checking if they can read. There is an addition permission,
@@ -58,7 +59,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	return file, nil
 }
 
-// Handle a write action for a file on the system.
+// Filewrite handles the write actions for a file on the system.
 func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	if fs.ReadOnly {
 		return nil, sftp.ErrSshFxOpUnsupported
@@ -155,7 +156,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	return file, nil
 }
 
-// Hander for basic SFTP system calls related to files, but not anything to do with reading
+// Filecmd hander for basic SFTP system calls related to files, but not anything to do with reading
 // or writing to those files.
 func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	if fs.ReadOnly {
@@ -181,6 +182,14 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	switch request.Method {
 	case "Setstat":
 		var mode os.FileMode = 0644
+
+		// If the client passed a valid file permission use that, otherwise use the
+		// default of 0644 set above.
+		if request.Attributes().FileMode().Perm() != 0000 {
+			mode = request.Attributes().FileMode().Perm()
+		}
+
+		// Force directories to be 0755
 		if request.Attributes().FileMode().IsDir() {
 			mode = 0755
 		}
@@ -272,7 +281,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	return sftp.ErrSshFxOk
 }
 
-// Handler for SFTP filesystem list calls. This will handle calls to list the contents of
+// Filelist is the handler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
 func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 	p, err := fs.buildPath(request.Filepath)
@@ -328,6 +337,24 @@ func (fs FileSystem) buildPath(rawPath string) (string, error) {
 	// If the new path doesn't start with their root directory there is clearly an escape
 	// attempt going on, and we should NOT resolve this path for them.
 	if !strings.HasPrefix(p, fs.Directory) {
+		return "", errors.New("invalid path resolution")
+	}
+
+	// If the file doesn't exist pass the path back.
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		return p, nil
+	}
+
+	// Resolve the absolute path for the file following any symlinks. Use this finalized
+	// path to determine if the requested file is within the current server's path.
+	final, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", errors.New("error evaluating symlink path")
+	}
+
+	dir, _ := path.Split(p)
+
+	if !strings.Contains(final, dir) {
 		return "", errors.New("invalid path resolution")
 	}
 

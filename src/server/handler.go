@@ -181,14 +181,15 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	switch request.Method {
 	case "Setstat":
-		var mode os.FileMode
+		var mode os.FileMode = 0644
 
+		// If the client passed a valid file permission use that, otherwise use the
+		// default of 0644 set above.
 		if request.Attributes().FileMode().Perm() != 0000 {
 			mode = request.Attributes().FileMode().Perm()
-		} else {
-			mode = 0644
 		}
 
+		// Force directories to be 0755
 		if request.Attributes().FileMode().IsDir() {
 			mode = 0755
 		}
@@ -344,15 +345,16 @@ func (fs FileSystem) buildPath(rawPath string) (string, error) {
 		return p, nil
 	}
 
-	// Check if the path is in the server directory and return a no if it isn't.
-	symfile, err := filepath.EvalSymlinks(p)
+	// Resolve the absolute path for the file following any symlinks. Use this finalized
+	// path to determine if the requested file is within the current server's path.
+	final, err := filepath.EvalSymlinks(p)
 	if err != nil {
 		return "", errors.New("error evaluating symlink path")
 	}
 
 	dir, _ := path.Split(p)
 
-	if !strings.Contains(symfile, dir) {
+	if !strings.Contains(final, dir) {
 		return "", errors.New("invalid path resolution")
 	}
 

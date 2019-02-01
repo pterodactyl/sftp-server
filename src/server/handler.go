@@ -354,7 +354,7 @@ func (fs FileSystem) buildPath(rawPath string) (string, error) {
 
 	dir, _ := path.Split(p)
 
-	if !strings.Contains(final, dir) {
+	if !strings.HasPrefix(final, dir) {
 		return "", errors.New("invalid path resolution")
 	}
 

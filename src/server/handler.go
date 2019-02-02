@@ -330,35 +330,61 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 // from their data directory. After normalization if the directory is still within their home
 // path it is returned. If they managed to "escape" an error will be returned.
 func (fs FileSystem) buildPath(rawPath string) (string, error) {
+	var nonExistentPathResolution string
 	// Calling filepath.Clean on the joined directory will resolve it to the absolute path,
-	// removing any ../ type of path resolution, and leaving us with the absolute final path.
-	p := filepath.Clean(filepath.Join(fs.Directory, rawPath))
+	// removing any ../ type of path resolution, and leaving us with a direct path link.
+	r := filepath.Clean(filepath.Join(fs.Directory, rawPath))
+
+	// At the same time, evaluate the symlink status and determine where this file or folder
+	// is truly pointing to.
+	p, err := filepath.EvalSymlinks(r)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	} else if os.IsNotExist(err) {
+		// The requested directory doesn't exist, so at this point we need to iterate up the
+		// path chain until we hit a directory that _does_ exist and can be validated.
+		parts := strings.Split(filepath.Dir(r), "/")
+
+		var try string
+		// Range over all of the path parts and form directory pathings from the end
+		// moving up until we have a valid resolution or we run out of paths to try.
+		for k := range parts {
+			try = strings.Join(parts[:(len(parts) - k)], "/")
+
+			if !strings.HasPrefix(try, fs.Directory) {
+				break
+			}
+
+			t, err := filepath.EvalSymlinks(try)
+			if err == nil {
+				nonExistentPathResolution = t
+				break
+			}
+		}
+	}
 
 	// If the new path doesn't start with their root directory there is clearly an escape
 	// attempt going on, and we should NOT resolve this path for them.
-	if !strings.HasPrefix(p, fs.Directory) {
-		return "", errors.New("invalid path resolution")
+	if nonExistentPathResolution != "" {
+		if !strings.HasPrefix(nonExistentPathResolution, fs.Directory) {
+			return "", errors.New("invalid path resolution")
+		}
+
+		// If the nonExistentPathResoltion variable is not empty then the initial path requested
+		// did not exist and we looped through the pathway until we found a match. At this point
+		// we've confirmed the first matched pathway exists in the root server directory, so we
+		// can go ahead and just return the path that was requested initially.
+		return r, nil
 	}
 
-	// If the file doesn't exist pass the path back.
-	if _, err := os.Stat(p); os.IsNotExist(err) {
+	// If the requested directory from EvalSymlinks begins with the server root directory go
+	// ahead and return it. If not we'll return an error which will block any further action
+	// on the file.
+	if strings.HasPrefix(p, fs.Directory) {
 		return p, nil
 	}
 
-	// Resolve the absolute path for the file following any symlinks. Use this finalized
-	// path to determine if the requested file is within the current server's path.
-	final, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return "", errors.New("error evaluating symlink path")
-	}
-
-	dir, _ := path.Split(p)
-
-	if !strings.Contains(final, dir) {
-		return "", errors.New("invalid path resolution")
-	}
-
-	return p, nil
+	return "", errors.New("invalid path resolution")
 }
 
 // Determines if a user has permission to perform a specific action on the SFTP server. These

@@ -4,11 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/buger/jsonparser"
-	"github.com/patrickmn/go-cache"
-	"github.com/pterodactyl/sftp-server/src/logger"
-	"github.com/pterodactyl/sftp-server/src/server"
-	"go.uber.org/zap"
 	"io/ioutil"
 	"os"
 	"os/user"
@@ -16,6 +11,12 @@ import (
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/buger/jsonparser"
+	"github.com/patrickmn/go-cache"
+	"github.com/pterodactyl/sftp-server/src/logger"
+	"github.com/pterodactyl/sftp-server/src/server"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -64,13 +65,22 @@ func main() {
 		return
 	}
 
+	// default to config port if the sftp was not passed.
+	if !isFlagPassed("port") {
+		confPort, err := jsonparser.GetInt(config, "sftp", "port")
+		if err != nil {
+			logger.Get().Debugw("could not find sftp port, falling back to \"2022\"", zap.Error(err))
+		}
+		bindPort = int(confPort)
+	}
+
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 
 	var s = server.Configuration{
 		Data:  config,
 		Cache: cache.New(5*time.Minute, 10*time.Minute),
-		User:  server.SftpUser{
+		User: server.SftpUser{
 			Uid: uid,
 			Gid: gid,
 		},
@@ -100,4 +110,14 @@ func readConfiguration(path string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func isFlagPassed(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }

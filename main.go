@@ -71,6 +71,7 @@ func main() {
 		if err != nil {
 			logger.Get().Debugw("could not find sftp port, falling back to \"2022\"", zap.Error(err))
 		}
+		logger.Get().Infow("using config daemon port", zap.String("port", strconv.Itoa(int(confPort))))
 		bindPort = int(confPort)
 	}
 

@@ -67,12 +67,16 @@ func main() {
 
 	// default to config port if the sftp was not passed.
 	if !isFlagPassed("port") {
+		// get port form config
 		confPort, err := jsonparser.GetInt(config, "sftp", "port")
 		if err != nil {
-			logger.Get().Debugw("could not find sftp port, falling back to \"2022\"", zap.Error(err))
-		}
-		logger.Get().Infow("using config daemon port", zap.String("port", strconv.Itoa(int(confPort))))
-		bindPort = int(confPort)
+			// default to the bindPort default from the flag section
+			logger.Get().Debugw("could not find sftp port, falling back to \"2022\"", zap.Error(err))111
+		} else {
+			// set bindPort to the confPort value
+			logger.Get().Infow("using config daemon port", zap.String("port", zap.int(confPort))
+			bindPort = int(confPort)
+		}	
 	}
 
 	uid, _ := strconv.Atoi(u.Uid)

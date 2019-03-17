@@ -71,7 +71,7 @@ func main() {
 		confPort, err := jsonparser.GetInt(config, "sftp", "port")
 		if err != nil {
 			// default to the bindPort default from the flag section
-			logger.Get().Debugw("could not find sftp port, falling back to \"2022\"", zap.Error(err))111
+			logger.Get().Debugw("could not find sftp port, falling back to \"2022\"", zap.Error(err))
 		} else {
 			// set bindPort to the confPort value
 			logger.Get().Infow("using config daemon port", zap.String("port", zap.int(confPort))

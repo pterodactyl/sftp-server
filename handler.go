@@ -1,4 +1,4 @@
-package server
+package sftp_server
 
 import (
 	"io"
@@ -10,10 +10,9 @@ import (
 	"sync"
 
 	"github.com/buger/jsonparser"
-	cache "github.com/patrickmn/go-cache"
+	"github.com/patrickmn/go-cache"
 	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
-	"github.com/pterodactyl/sftp-server/src/logger"
 	"go.uber.org/zap"
 )
 
@@ -26,7 +25,9 @@ type FileSystem struct {
 	DisableDiskCheck bool
 	User             SftpUser
 	Cache            *cache.Cache
-	lock             sync.Mutex
+
+	logger *zap.SugaredLogger
+	lock   sync.Mutex
 }
 
 // Fileread creates a reader for a file on the system and returns the reader back.
@@ -52,7 +53,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 
 	file, err := os.Open(p)
 	if err != nil {
-		logger.Get().Errorw("could not open file for reading", zap.String("source", p), zap.Error(err))
+		fs.logger.Errorw("could not open file for reading", zap.String("source", p), zap.Error(err))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -73,7 +74,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// If the user doesn't have enough space left on the server it should respond with an
 	// error since we won't be letting them write this file to the disk.
 	if !fs.hasSpace() {
-		logger.Get().Infow("denying file write due to space limit", zap.String("server", fs.UUID))
+		fs.logger.Infow("denying file write due to space limit", zap.String("server", fs.UUID))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -92,7 +93,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 		// Create all of the directories leading up to the location where this file is being created.
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-			logger.Get().Errorw("error making path for file",
+			fs.logger.Errorw("error making path for file",
 				zap.String("source", p),
 				zap.String("path", filepath.Dir(p)),
 				zap.Error(err),
@@ -102,14 +103,14 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 		file, err := os.Create(p)
 		if err != nil {
-			logger.Get().Errorw("error creating file", zap.String("source", p), zap.Error(err))
+			fs.logger.Errorw("error creating file", zap.String("source", p), zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 
 		// Not failing here is intentional. We still made the file, it is just owned incorrectly
 		// and will likely cause some issues.
 		if err := os.Chown(p, fs.User.Uid, fs.User.Gid); err != nil {
-			logger.Get().Warnw("error chowning file", zap.String("file", p), zap.Error(err))
+			fs.logger.Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 		}
 
 		return file, nil
@@ -118,7 +119,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// If the stat error isn't about the file not existing, there is some other issue
 	// at play and we need to go ahead and bail out of the process.
 	if statErr != nil {
-		logger.Get().Errorw("error performing file stat", zap.String("source", p), zap.Error(statErr))
+		fs.logger.Errorw("error performing file stat", zap.String("source", p), zap.Error(statErr))
 		return nil, sftp.ErrSshFxFailure
 	}
 
@@ -133,13 +134,13 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 	// Not sure this would ever happen, but lets not find out.
 	if stat.IsDir() {
-		logger.Get().Warnw("attempted to open a directory for writing to", zap.String("source", p))
+		fs.logger.Warnw("attempted to open a directory for writing to", zap.String("source", p))
 		return nil, sftp.ErrSshFxOpUnsupported
 	}
 
 	file, err := os.Create(p)
 	if err != nil {
-		logger.Get().Errorw("error opening existing file",
+		fs.logger.Errorw("error opening existing file",
 			zap.Uint32("flags", request.Flags),
 			zap.String("source", p),
 			zap.Error(err),
@@ -150,7 +151,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues.
 	if err := os.Chown(p, fs.User.Uid, fs.User.Gid); err != nil {
-		logger.Get().Warnw("error chowning file", zap.String("file", p), zap.Error(err))
+		fs.logger.Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 	}
 
 	return file, nil
@@ -195,7 +196,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.Chmod(p, mode); err != nil {
-			logger.Get().Errorw("failed to perform setstat", zap.Error(err))
+			fs.logger.Errorw("failed to perform setstat", zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 		return nil
@@ -205,7 +206,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.Rename(p, target); err != nil {
-			logger.Get().Errorw("failed to rename file",
+			fs.logger.Errorw("failed to rename file",
 				zap.String("source", p),
 				zap.String("target", target),
 				zap.Error(err),
@@ -220,7 +221,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.RemoveAll(p); err != nil {
-			logger.Get().Errorw("failed to remove directory", zap.String("source", p), zap.Error(err))
+			fs.logger.Errorw("failed to remove directory", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 
@@ -231,7 +232,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.MkdirAll(p, 0755); err != nil {
-			logger.Get().Errorw("failed to create directory", zap.String("source", p), zap.Error(err))
+			fs.logger.Errorw("failed to create directory", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 
@@ -242,7 +243,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.Symlink(p, target); err != nil {
-			logger.Get().Errorw("failed to create symlink",
+			fs.logger.Errorw("failed to create symlink",
 				zap.String("source", p),
 				zap.String("target", target),
 				zap.Error(err),
@@ -257,7 +258,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.Remove(p); err != nil {
-			logger.Get().Errorw("failed to remove a file", zap.String("source", p), zap.Error(err))
+			fs.logger.Errorw("failed to remove a file", zap.String("source", p), zap.Error(err))
 			return sftp.ErrSshFxFailure
 		}
 
@@ -275,7 +276,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	// and will likely cause some issues. There is no logical check for if the file was removed
 	// because both of those cases (Rmdir, Remove) have an explicit return rather than break.
 	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
-		logger.Get().Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
+		fs.logger.Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
 	}
 
 	return sftp.ErrSshFxOk
@@ -297,7 +298,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 
 		files, err := ioutil.ReadDir(p)
 		if err != nil {
-			logger.Get().Error("error listing directory", zap.Error(err))
+			fs.logger.Error("error listing directory", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 
@@ -311,7 +312,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 		if os.IsNotExist(err) {
 			return nil, sftp.ErrSshFxNoSuchFile
 		} else if err != nil {
-			logger.Get().Error("error running STAT on file", zap.Error(err))
+			fs.logger.Error("error running STAT on file", zap.Error(err))
 			return nil, sftp.ErrSshFxFailure
 		}
 
@@ -435,7 +436,7 @@ func (fs FileSystem) hasSpace() bool {
 	if space == -2 {
 		b, err := ioutil.ReadFile(fs.ServerConfig)
 		if err != nil {
-			logger.Get().Errorf(
+			fs.logger.Errorf(
 				"error reading server configuration, cannot determine disk limit",
 				zap.String("server", fs.UUID),
 				zap.Error(err),
@@ -454,7 +455,7 @@ func (fs FileSystem) hasSpace() bool {
 
 	// If space is -1 or 0 just return true, means they're allowed unlimited.
 	if space <= 0 {
-		logger.Get().Debugw("server marked as not having space limit", zap.String("server", fs.UUID))
+		fs.logger.Debugw("server marked as not having space limit", zap.String("server", fs.UUID))
 		return true
 	}
 
@@ -469,7 +470,7 @@ func (fs FileSystem) hasSpace() bool {
 	// the cache once we've gotten it.
 	if size == 0 {
 		size = fs.directorySize(fs.Directory)
-		logger.Get().Debugw("got directory size from taxing operation", zap.String("server", fs.UUID), zap.Int64("size", size))
+		fs.logger.Debugw("got directory size from taxing operation", zap.String("server", fs.UUID), zap.Int64("size", size))
 		fs.Cache.Set("used:"+fs.UUID, size, cache.DefaultExpiration)
 	}
 
@@ -486,7 +487,7 @@ func (fs FileSystem) directorySize(dir string) int64 {
 
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		logger.Get().Errorw("error reading directory", zap.String("directory", dir), zap.Error(err))
+		fs.logger.Errorw("error reading directory", zap.String("directory", dir), zap.Error(err))
 		return 0
 	}
 

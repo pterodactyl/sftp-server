@@ -1,4 +1,4 @@
-package server
+package sftp_server
 
 import (
 	"io"

@@ -1,5 +1,7 @@
 github.com/buger/jsonparser v0.0.0-20181023193515-52c6e1462ebd h1:5T+u+bQ8I1bOgzmu96rHImT0VjPsj3q33dR3j2AqmXU=
 github.com/buger/jsonparser v0.0.0-20181023193515-52c6e1462ebd/go.mod h1:bbYlZJ7hK1yFx9hf58LP0zeX7UjIGs20ufpu3evjr+s=
+github.com/buger/jsonparser v0.0.0-20191204142016-1a29609e0929 h1:MW/JDk68Rny52yI0M0N+P8lySNgB+NhpI/uAmhgOhUM=
+github.com/buger/jsonparser v0.0.0-20191204142016-1a29609e0929/go.mod h1:tgcrVJ81GPSF0mz+0nu1Xaz0fazGPrmmJfJtxjbHhUQ=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
 github.com/patrickmn/go-cache v2.1.0+incompatible h1:HRMgzkcYKYpi3C8ajMPV8OFXaaRUnok+kx1WdO15EQc=

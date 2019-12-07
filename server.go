@@ -1,34 +1,23 @@
-package server
+package sftp_server
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"github.com/buger/jsonparser"
 	"github.com/patrickmn/go-cache"
-	"github.com/pkg/errors"
 	"github.com/pkg/sftp"
-	"github.com/pterodactyl/sftp-server/src/logger"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
 	"net"
-	"net/http"
 	"os"
 	"path"
 	"strings"
 	"time"
 )
-
-type AuthenticationRequest struct {
-	User string `json:"username"`
-	Pass string `json:"password"`
-}
 
 type Settings struct {
 	BasePath         string
@@ -44,36 +33,70 @@ type SftpUser struct {
 	Gid int
 }
 
-type Configuration struct {
-	Data     []byte
-	Cache    *cache.Cache
+type Server struct {
+	// A custom logger instance that should be used by the server.
+	logger *zap.SugaredLogger
+	cache  *cache.Cache
+
 	Settings Settings
 	User     SftpUser
+
+	// Validator function that is called when a user connects to the server. This should
+	// check against whatever system is desired to confirm if the given username and password
+	// combination is valid. If so, should return an authentication response.
+	CredentialValidator func(r AuthenticationRequest) (*AuthenticationResponse, error)
 }
 
-type AuthenticationResponse struct {
-	Server      string   `json:"server"`
-	Token       string   `json:"token"`
-	Permissions []string `json:"permissions"`
+// Create a new server configuration instance.
+func New(c *Server) error {
+	if logger, err := zap.NewProduction(); err != nil {
+		return err
+	} else {
+		c.logger = logger.Sugar()
+	}
+
+	c.cache = cache.New(5*time.Minute, 10*time.Minute)
+
+	return nil
+}
+
+// Allows configuration of a custom logger.
+func (c *Server) ConfigureLogger(cb func() *zap.SugaredLogger) {
+	c.logger = cb()
 }
 
 // Initalize the SFTP server and add a persistent listener to handle inbound SFTP connections.
-func (c Configuration) Initalize() error {
+func (c *Server) Initalize() error {
 	serverConfig := &ssh.ServerConfig{
 		NoClientAuth: false,
 		MaxAuthTries: 6,
 		PasswordCallback: func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			sp, err := c.validateCredentials(conn.User(), pass)
+			resp, err := c.CredentialValidator(AuthenticationRequest{
+				User: conn.User(),
+				Pass: string(pass),
+			})
+
 			if err != nil {
-				return nil, errors.New("could not validate credentials")
+				if !IsInvalidCredentialsError(err) {
+					c.logger.Errorw("encountered error validating user crendentials", zap.Error(err))
+				}
+
+				return nil, err
 			}
 
-			return sp, nil
+			sshPerm := &ssh.Permissions{
+				Extensions: map[string]string{
+					"uuid":        resp.Server,
+					"user":        conn.User(),
+					"permissions": strings.Join(resp.Permissions, ","),
+				},
+			}
+
+			return sshPerm, nil
 		},
 	}
 
 	if _, err := os.Stat(path.Join(c.Settings.BasePath, ".sftp/id_rsa")); os.IsNotExist(err) {
-		logger.Get().Info("creating new private key for server")
 		if err := c.generatePrivateKey(); err != nil {
 			return err
 		}
@@ -99,7 +122,7 @@ func (c Configuration) Initalize() error {
 		return err
 	}
 
-	logger.Get().Infow("server listener registered", zap.String("address", listener.Addr().String()))
+	c.logger.Infow("sftp subsystem listening for connections", zap.String("host", c.Settings.BindAddress), zap.Int("port", c.Settings.BindPort))
 
 	for {
 		conn, _ := listener.Accept()
@@ -107,28 +130,19 @@ func (c Configuration) Initalize() error {
 			go c.AcceptInboundConnection(conn, serverConfig)
 		}
 	}
-
-	return nil
 }
 
 // Handles an inbound connection to the instance and determines if we should serve the request
 // or not.
-func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.ServerConfig) {
+func (c Server) AcceptInboundConnection(conn net.Conn, config *ssh.ServerConfig) {
 	defer conn.Close()
 
 	// Before beginning a handshake must be performed on the incoming net.Conn
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
-		logger.Get().Warnw("failed to accept an incoming connection", zap.Error(err))
 		return
 	}
 	defer sconn.Close()
-
-	logger.Get().Debugw("accepted inbound connection",
-		zap.String("ip", conn.RemoteAddr().String()),
-		zap.String("user", sconn.Permissions.Extensions["user"]),
-		zap.String("uuid", sconn.Permissions.Extensions["uuid"]),
-	)
 
 	go ssh.DiscardRequests(reqs)
 
@@ -136,14 +150,12 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 		// If its not a session channel we just move on because its not something we
 		// know how to handle at this point.
 		if newChannel.ChannelType() != "session" {
-			logger.Get().Debugw("received an unknown channel type", zap.String("channel", newChannel.ChannelType()))
 			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
 			continue
 		}
 
 		channel, requests, err := newChannel.Accept()
 		if err != nil {
-			logger.Get().Warnw("could not accept a channel", zap.Error(err))
 			continue
 		}
 
@@ -166,7 +178,6 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 
 		// Configure the user's home folder for the rest of the request cycle.
 		if sconn.Permissions.Extensions["uuid"] == "" {
-			logger.Get().Errorw("got a server connection with no uuid")
 			continue
 		}
 
@@ -178,8 +189,6 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 
 		if err := server.Serve(); err == io.EOF {
 			server.Close()
-		} else if err != nil {
-			logger.Get().Errorw("sftp server closed with error", zap.Error(err))
 		}
 	}
 }
@@ -187,21 +196,17 @@ func (c Configuration) AcceptInboundConnection(conn net.Conn, config *ssh.Server
 // Creates a new SFTP handler for a given server. The directory argument should
 // be the base directory for a server. All actions done on the server will be
 // relative to that directory, and the user will not be able to escape out of it.
-func (c Configuration) createHandler(perm *ssh.Permissions) sftp.Handlers {
-	base, err := jsonparser.GetString(c.Data, "sftp", "path")
-	if err != nil || base == "" {
-		base = "/srv/daemon-data"
-	}
-
+func (c Server) createHandler(perm *ssh.Permissions) sftp.Handlers {
 	p := FileSystem{
 		ServerConfig:     path.Join(c.Settings.ServerDataFolder, perm.Extensions["uuid"], "server.json"),
-		Directory:        path.Join(base, perm.Extensions["uuid"]),
+		Directory:        path.Join(c.Settings.BasePath, perm.Extensions["uuid"]),
 		UUID:             perm.Extensions["uuid"],
 		Permissions:      strings.Split(perm.Extensions["permissions"], ","),
 		ReadOnly:         c.Settings.ReadOnly,
-		Cache:            c.Cache,
+		Cache:            c.cache,
 		DisableDiskCheck: c.Settings.DisableDiskCheck,
 		User:             c.User,
+		logger:           c.logger,
 	}
 
 	return sftp.Handlers{
@@ -212,64 +217,8 @@ func (c Configuration) createHandler(perm *ssh.Permissions) sftp.Handlers {
 	}
 }
 
-// Validates a set of credentials for a SFTP login aganist Pterodactyl Panel and returns
-// the server's UUID if the credentials were valid.
-func (c Configuration) validateCredentials(user string, pass []byte) (*ssh.Permissions, error) {
-	data, _ := json.Marshal(AuthenticationRequest{User: user, Pass: string(pass)})
-
-	url, err := jsonparser.GetString(c.Data, "remote", "base")
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/remote/sftp", url), bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
-	}
-
-	token, err := jsonparser.GetString(c.Data, "keys", "[0]")
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/vnd.pterodactyl.v1+json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		s, _ := ioutil.ReadAll(resp.Body)
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("bad credentials provided: %s", string(s))
-		}
-
-		if resp.StatusCode == http.StatusBadRequest {
-			return nil, fmt.Errorf("server in bad state, SFTP denied, %s", string(s))
-		}
-
-		return nil, fmt.Errorf("error response from server: %s", string(s))
-	}
-
-	j := &AuthenticationResponse{}
-	json.NewDecoder(resp.Body).Decode(j)
-
-	p := &ssh.Permissions{}
-	p.Extensions = make(map[string]string)
-	p.Extensions["uuid"] = j.Server
-	p.Extensions["user"] = user
-	p.Extensions["permissions"] = strings.Join(j.Permissions, ",")
-
-	return p, nil
-}
-
 // Generates a private key that will be used by the SFTP server.
-func (c Configuration) generatePrivateKey() error {
+func (c Server) generatePrivateKey() error {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return err

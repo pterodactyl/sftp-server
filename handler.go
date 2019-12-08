@@ -258,7 +258,9 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 
 		if err := os.Remove(p); err != nil {
-			fs.logger.Errorw("failed to remove a file", zap.String("source", p), zap.Error(err))
+			if !os.IsNotExist(err) {
+				fs.logger.Errorw("failed to remove a file", zap.String("source", p), zap.Error(err))
+			}
 			return sftp.ErrSshFxFailure
 		}
 

@@ -1,47 +1,11 @@
 # Pterodactyl SFTP Server
-This package serves as a SFTP server to run alongside the [Pterodactyl Daemon](https://github.com/pterodactyl/daemon).
-It is not designed to run stand-alone on your system.
-
-## Why?
-Previously we made use of Node.js to handle running our SFTP server for the Daemon. While this worked, and has allowed us
-to provide more advanced permissions and keep things off the host OS, it has also lead to many issues. Most notably has
-been extremely poor performance when trying to work with directories containing hundreds or thousands of files. In addition,
-this poor performance has also caused bottlenecking in the application when it comes to managing servers.
-
-Our goal with the introduction of this standalone server is to provide a lean, performant, fully-featured SFTP server
-that will hold up the the demands placed upon it.
-
-## Running
-To run this program in a standalone mode (rather than booted by the Daemon), use the arguments below.
-
-```
-./sftp-server [--config-path] [--port] [--bind-addr] [--readonly] [--disable-disk-check] [--debug]
-```
-
-### Flags
-```
-flag          default            help
---config-path       ./config/core.json This flag defines the location of the Daemon configuration file which
-                                       is read to help determine some internal settings.
-
---port               2022              The port for the SFTP server.
-
---bind-addr          0.0.0.0           The bind address for the SFTP server.
-
---readonly           false             If provided, the server will run in a read-only state that denies anyone,
-                                       regardless of permission, from writing or modifying files.
-
---disable-disk-check false             If passed, disk space usage will be disabled.
-
---debug              false             If passed, the server will run in debug mode which can be useful for printing
-                                       stacktraces and additional connection and error information.
-```
+This package serves as a SFTP server to run alongside the [Pterodactyl Daemon](https://github.com/pterodactyl/wings).
+Previous versions of this software included a standalone mode, however this repository now
+serves to provide API level access to the Wings Daemon for SFTP access.
 
 ## License
-Like all of our software, this server is provided under the MIT license.
-
 ```
-Copyright (c) 2018 Dane Everitt <dane@daneeveritt.com>
+Copyright (c) 2019 Dane Everitt <dane@daneeveritt.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

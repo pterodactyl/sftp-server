@@ -41,6 +41,9 @@ type Server struct {
 	Settings Settings
 	User     SftpUser
 
+	PathValidator      func(fs FileSystem, p string) (string, error)
+	DiskSpaceValidator func(fs FileSystem) bool
+
 	// Validator function that is called when a user connects to the server. This should
 	// check against whatever system is desired to confirm if the given username and password
 	// combination is valid. If so, should return an authentication response.
@@ -206,6 +209,8 @@ func (c Server) createHandler(perm *ssh.Permissions) sftp.Handlers {
 		Cache:            c.cache,
 		DisableDiskCheck: c.Settings.DisableDiskCheck,
 		User:             c.User,
+		HasDiskSpace:     c.DiskSpaceValidator,
+		PathValidator:    c.PathValidator,
 		logger:           c.logger,
 	}
 

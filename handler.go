@@ -1,19 +1,14 @@
 package sftp_server
 
 import (
+	"github.com/patrickmn/go-cache"
+	"github.com/pkg/sftp"
+	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
-	"strings"
 	"sync"
-
-	"github.com/buger/jsonparser"
-	"github.com/patrickmn/go-cache"
-	"github.com/pkg/errors"
-	"github.com/pkg/sftp"
-	"go.uber.org/zap"
 )
 
 type FileSystem struct {
@@ -26,8 +21,15 @@ type FileSystem struct {
 	User             SftpUser
 	Cache            *cache.Cache
 
+	PathValidator func(fs FileSystem, p string) (string, error)
+	HasDiskSpace func(fs FileSystem) bool
+
 	logger *zap.SugaredLogger
 	lock   sync.Mutex
+}
+
+func (fs FileSystem) buildPath(p string) (string, error) {
+	return fs.PathValidator(fs, p)
 }
 
 // Fileread creates a reader for a file on the system and returns the reader back.
@@ -73,7 +75,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 	// If the user doesn't have enough space left on the server it should respond with an
 	// error since we won't be letting them write this file to the disk.
-	if !fs.hasSpace() {
+	if !fs.HasDiskSpace(fs) {
 		fs.logger.Infow("denying file write due to space limit", zap.String("server", fs.UUID))
 		return nil, sftp.ErrSshFxFailure
 	}
@@ -329,67 +331,6 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 	}
 }
 
-// Normalizes a directory we get from the SFTP request to ensure the user is not able to escape
-// from their data directory. After normalization if the directory is still within their home
-// path it is returned. If they managed to "escape" an error will be returned.
-func (fs FileSystem) buildPath(rawPath string) (string, error) {
-	var nonExistentPathResolution string
-	// Calling filepath.Clean on the joined directory will resolve it to the absolute path,
-	// removing any ../ type of path resolution, and leaving us with a direct path link.
-	r := filepath.Clean(filepath.Join(fs.Directory, rawPath))
-
-	// At the same time, evaluate the symlink status and determine where this file or folder
-	// is truly pointing to.
-	p, err := filepath.EvalSymlinks(r)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	} else if os.IsNotExist(err) {
-		// The requested directory doesn't exist, so at this point we need to iterate up the
-		// path chain until we hit a directory that _does_ exist and can be validated.
-		parts := strings.Split(filepath.Dir(r), "/")
-
-		var try string
-		// Range over all of the path parts and form directory pathings from the end
-		// moving up until we have a valid resolution or we run out of paths to try.
-		for k := range parts {
-			try = strings.Join(parts[:(len(parts) - k)], "/")
-
-			if !strings.HasPrefix(try, fs.Directory) {
-				break
-			}
-
-			t, err := filepath.EvalSymlinks(try)
-			if err == nil {
-				nonExistentPathResolution = t
-				break
-			}
-		}
-	}
-
-	// If the new path doesn't start with their root directory there is clearly an escape
-	// attempt going on, and we should NOT resolve this path for them.
-	if nonExistentPathResolution != "" {
-		if !strings.HasPrefix(nonExistentPathResolution, fs.Directory) {
-			return "", errors.New("invalid path resolution")
-		}
-
-		// If the nonExistentPathResoltion variable is not empty then the initial path requested
-		// did not exist and we looped through the pathway until we found a match. At this point
-		// we've confirmed the first matched pathway exists in the root server directory, so we
-		// can go ahead and just return the path that was requested initially.
-		return r, nil
-	}
-
-	// If the requested directory from EvalSymlinks begins with the server root directory go
-	// ahead and return it. If not we'll return an error which will block any further action
-	// on the file.
-	if strings.HasPrefix(p, fs.Directory) {
-		return p, nil
-	}
-
-	return "", errors.New("invalid path resolution")
-}
-
 // Determines if a user has permission to perform a specific action on the SFTP server. These
 // permissions are defined and returned by the Panel API.
 func (fs FileSystem) can(permission string) bool {
@@ -409,103 +350,4 @@ func (fs FileSystem) can(permission string) bool {
 	}
 
 	return false
-}
-
-// Determines if the directory a file is trying to be added to has enough space available
-// for the file to be written to.
-//
-// Because determining the amount of space being used by a server is a taxing operation we
-// will load it all up into a cache and pull from that as long as the key is not expired.
-func (fs FileSystem) hasSpace() bool {
-	// This is a safety measure to ensure that users who encounter FS related issues can
-	// quickly disable this feature to allow me time to look into what is going wrong and
-	// hopefully address it.
-	//
-	// I get the feeling this might be used sooner rather than later unfortunately...
-	if fs.DisableDiskCheck {
-		return true
-	}
-
-	var space int64 = -2
-	if x, exists := fs.Cache.Get("disk:" + fs.UUID); exists {
-		space = x.(int64)
-	}
-
-	// If the value is still -2 it means we didn't manage to grab anything out of the cache.
-	// In that case, read the server configuration and then plop that value into the cache.
-	// If there is an error reading the configuration just return true, can't do anything more
-	// until the error gets resolved.
-	if space == -2 {
-		b, err := ioutil.ReadFile(fs.ServerConfig)
-		if err != nil {
-			fs.logger.Errorf(
-				"error reading server configuration, cannot determine disk limit",
-				zap.String("server", fs.UUID),
-				zap.Error(err),
-			)
-			return true
-		}
-
-		s, err := jsonparser.GetInt(b, "build", "disk")
-		if err != nil {
-			s = 0
-		}
-
-		fs.Cache.Set("disk:"+fs.UUID, s, cache.DefaultExpiration)
-		space = s
-	}
-
-	// If space is -1 or 0 just return true, means they're allowed unlimited.
-	if space <= 0 {
-		fs.logger.Debugw("server marked as not having space limit", zap.String("server", fs.UUID))
-		return true
-	}
-
-	var size int64
-	if x, exists := fs.Cache.Get("used:" + fs.UUID); exists {
-		size = x.(int64)
-	}
-
-	// If there is no size its either because there is no data (in which case running this function
-	// will have effectively no impact), or there is nothing in the cache, in which case we need to
-	// grab the size of their data directory. This is a taxing operation, so we want to store it in
-	// the cache once we've gotten it.
-	if size == 0 {
-		size = fs.directorySize(fs.Directory)
-		fs.logger.Debugw("got directory size from taxing operation", zap.String("server", fs.UUID), zap.Int64("size", size))
-		fs.Cache.Set("used:"+fs.UUID, size, cache.DefaultExpiration)
-	}
-
-	// Determine if their folder size, in bytes, is smaller than the amount of space they've
-	// been allocated.
-	return (size / 1024.0 / 1024.0) <= space
-}
-
-// Determines the directory size of a given location by running parallel tasks to iterate
-// through all of the folders. Returns the size in bytes.
-func (fs FileSystem) directorySize(dir string) int64 {
-	var size int64
-	var wg sync.WaitGroup
-
-	files, err := ioutil.ReadDir(dir)
-	if err != nil {
-		fs.logger.Errorw("error reading directory", zap.String("directory", dir), zap.Error(err))
-		return 0
-	}
-
-	for _, f := range files {
-		if f.IsDir() {
-			wg.Add(1)
-			go func(p string) {
-				defer wg.Done()
-				size += fs.directorySize(p)
-			}(path.Join(dir, f.Name()))
-		} else {
-			size += f.Size()
-		}
-	}
-
-	wg.Wait()
-
-	return size
 }

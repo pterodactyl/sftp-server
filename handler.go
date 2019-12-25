@@ -12,8 +12,6 @@ import (
 )
 
 type FileSystem struct {
-	ServerConfig     string
-	Directory        string
 	UUID             string
 	Permissions      []string
 	ReadOnly         bool

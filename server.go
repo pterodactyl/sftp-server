@@ -201,8 +201,6 @@ func (c Server) AcceptInboundConnection(conn net.Conn, config *ssh.ServerConfig)
 // relative to that directory, and the user will not be able to escape out of it.
 func (c Server) createHandler(perm *ssh.Permissions) sftp.Handlers {
 	p := FileSystem{
-		ServerConfig:     path.Join(c.Settings.ServerDataFolder, perm.Extensions["uuid"], "server.json"),
-		Directory:        path.Join(c.Settings.BasePath, perm.Extensions["uuid"]),
 		UUID:             perm.Extensions["uuid"],
 		Permissions:      strings.Split(perm.Extensions["permissions"], ","),
 		ReadOnly:         c.Settings.ReadOnly,

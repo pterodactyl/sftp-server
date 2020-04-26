@@ -80,10 +80,6 @@ func (c *Server) Initalize() error {
 			})
 
 			if err != nil {
-				if !IsInvalidCredentialsError(err) {
-					c.logger.Errorw("encountered error validating user crendentials", zap.Error(err))
-				}
-
 				return nil, err
 			}
 

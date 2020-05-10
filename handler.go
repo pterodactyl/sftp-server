@@ -15,7 +15,6 @@ type FileSystem struct {
 	UUID             string
 	Permissions      []string
 	ReadOnly         bool
-	DisableDiskCheck bool
 	User             SftpUser
 	Cache            *cache.Cache
 
@@ -30,12 +29,19 @@ func (fs FileSystem) buildPath(p string) (string, error) {
 	return fs.PathValidator(fs, p)
 }
 
+const (
+	PermissionFileRead = "file.read"
+	PermissionFileCreate = "file.create"
+	PermissionFileUpdate = "file.update"
+	PermissionFileDelete = "file.delete"
+)
+
 // Fileread creates a reader for a file on the system and returns the reader back.
 func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	// Check first if the user can actually open and view a file. This permission is named
 	// really poorly, but it is checking if they can read. There is an addition permission,
 	// "save-files" which determines if they can write that file.
-	if !fs.can("edit-files") {
+	if !fs.can(PermissionFileRead) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
@@ -87,7 +93,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	if os.IsNotExist(statErr) {
 		// This is a different pathway than just editing an existing file. If it doesn't exist already
 		// we need to determine if this user has permission to create files.
-		if !fs.can("create-files") {
+		if !fs.can(PermissionFileCreate) {
 			return nil, sftp.ErrSshFxPermissionDenied
 		}
 
@@ -128,7 +134,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// goal with the file is going to be.
 	//
 	// But first, check that the user has permission to save modified files.
-	if !fs.can("save-files") {
+	if !fs.can(PermissionFileUpdate) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
@@ -201,7 +207,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 		}
 		return nil
 	case "Rename":
-		if !fs.can("move-files") {
+		if !fs.can(PermissionFileUpdate) {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
@@ -216,7 +222,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 		break
 	case "Rmdir":
-		if !fs.can("delete-files") {
+		if !fs.can(PermissionFileDelete) {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
@@ -227,7 +233,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 		return sftp.ErrSshFxOk
 	case "Mkdir":
-		if !fs.can("create-files") {
+		if !fs.can(PermissionFileCreate) {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
@@ -238,7 +244,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 		break
 	case "Symlink":
-		if !fs.can("create-files") {
+		if !fs.can(PermissionFileCreate) {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
@@ -253,7 +259,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 		break
 	case "Remove":
-		if !fs.can("delete-files") {
+		if !fs.can(PermissionFileDelete) {
 			return sftp.ErrSshFxPermissionDenied
 		}
 
@@ -294,7 +300,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 
 	switch request.Method {
 	case "List":
-		if !fs.can("list-files") {
+		if !fs.can(PermissionFileRead) {
 			return nil, sftp.ErrSshFxPermissionDenied
 		}
 
@@ -306,7 +312,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 
 		return ListerAt(files), nil
 	case "Stat":
-		if !fs.can("list-files") {
+		if !fs.can(PermissionFileRead) {
 			return nil, sftp.ErrSshFxPermissionDenied
 		}
 

@@ -24,8 +24,6 @@ type Settings struct {
 	ReadOnly         bool
 	BindPort         int
 	BindAddress      string
-	ServerDataFolder string
-	DisableDiskCheck bool
 }
 
 type SftpUser struct {
@@ -201,7 +199,6 @@ func (c Server) createHandler(perm *ssh.Permissions) sftp.Handlers {
 		Permissions:      strings.Split(perm.Extensions["permissions"], ","),
 		ReadOnly:         c.Settings.ReadOnly,
 		Cache:            c.cache,
-		DisableDiskCheck: c.Settings.DisableDiskCheck,
 		User:             c.User,
 		HasDiskSpace:     c.DiskSpaceValidator,
 		PathValidator:    c.PathValidator,

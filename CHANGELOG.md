@@ -1,6 +1,10 @@
 # Changelog
 This file is a running track of new features and fixes to each version of the daemon released starting with `v1.0.3`.
 
+## v1.0.5
+### Fixed
+* Before verifying credentials from the panel, it now attempts to validate the username syntax to be correct
+
 ## v1.0.4
 ### Fixed
 * [Security] Addresses a bug in path resolution when writing deep directories that could allow a user to write (but not read) a file outside their server scope.

@@ -12,14 +12,14 @@ import (
 )
 
 type FileSystem struct {
-	UUID             string
-	Permissions      []string
-	ReadOnly         bool
-	User             SftpUser
-	Cache            *cache.Cache
+	UUID        string
+	Permissions []string
+	ReadOnly    bool
+	User        SftpUser
+	Cache       *cache.Cache
 
 	PathValidator func(fs FileSystem, p string) (string, error)
-	HasDiskSpace func(fs FileSystem) bool
+	HasDiskSpace  func(fs FileSystem) bool
 
 	logger *zap.SugaredLogger
 	lock   sync.Mutex
@@ -30,7 +30,7 @@ func (fs FileSystem) buildPath(p string) (string, error) {
 }
 
 const (
-	PermissionFileRead = "file.read"
+	PermissionFileRead   = "file.read"
 	PermissionFileCreate = "file.create"
 	PermissionFileUpdate = "file.update"
 	PermissionFileDelete = "file.delete"
@@ -80,8 +80,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// If the user doesn't have enough space left on the server it should respond with an
 	// error since we won't be letting them write this file to the disk.
 	if !fs.HasDiskSpace(fs) {
-		fs.logger.Infow("denying file write due to space limit", zap.String("server", fs.UUID))
-		return nil, sftp.ErrSshFxFailure
+		return nil, ErrSshQuotaExceeded
 	}
 
 	fs.lock.Lock()

@@ -1,8 +1,11 @@
 package sftp_server
 
 type AuthenticationRequest struct {
-	User string `json:"username"`
-	Pass string `json:"password"`
+	User          string `json:"username"`
+	Pass          string `json:"password"`
+	IP            string `json:"ip"`
+	SessionID     []byte `json:"session_id"`
+	ClientVersion []byte `json:"client_version"`
 }
 
 type AuthenticationResponse struct {

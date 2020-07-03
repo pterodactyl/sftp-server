@@ -20,10 +20,10 @@ import (
 )
 
 type Settings struct {
-	BasePath         string
-	ReadOnly         bool
-	BindPort         int
-	BindAddress      string
+	BasePath    string
+	ReadOnly    bool
+	BindPort    int
+	BindAddress string
 }
 
 type SftpUser struct {
@@ -73,8 +73,11 @@ func (c *Server) Initalize() error {
 		MaxAuthTries: 6,
 		PasswordCallback: func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			resp, err := c.CredentialValidator(AuthenticationRequest{
-				User: conn.User(),
-				Pass: string(pass),
+				User:          conn.User(),
+				Pass:          string(pass),
+				IP:            conn.RemoteAddr().String(),
+				SessionID:     conn.SessionID(),
+				ClientVersion: conn.ClientVersion(),
 			})
 
 			if err != nil {
@@ -195,14 +198,14 @@ func (c Server) AcceptInboundConnection(conn net.Conn, config *ssh.ServerConfig)
 // relative to that directory, and the user will not be able to escape out of it.
 func (c Server) createHandler(perm *ssh.Permissions) sftp.Handlers {
 	p := FileSystem{
-		UUID:             perm.Extensions["uuid"],
-		Permissions:      strings.Split(perm.Extensions["permissions"], ","),
-		ReadOnly:         c.Settings.ReadOnly,
-		Cache:            c.cache,
-		User:             c.User,
-		HasDiskSpace:     c.DiskSpaceValidator,
-		PathValidator:    c.PathValidator,
-		logger:           c.logger,
+		UUID:          perm.Extensions["uuid"],
+		Permissions:   strings.Split(perm.Extensions["permissions"], ","),
+		ReadOnly:      c.Settings.ReadOnly,
+		Cache:         c.cache,
+		User:          c.User,
+		HasDiskSpace:  c.DiskSpaceValidator,
+		PathValidator: c.PathValidator,
+		logger:        c.logger,
 	}
 
 	return sftp.Handlers{

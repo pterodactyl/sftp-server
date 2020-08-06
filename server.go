@@ -66,8 +66,8 @@ func (c *Server) ConfigureLogger(cb func() *zap.SugaredLogger) {
 	c.logger = cb()
 }
 
-// Initalize the SFTP server and add a persistent listener to handle inbound SFTP connections.
-func (c *Server) Initalize() error {
+// Initialize the SFTP server and add a persistent listener to handle inbound SFTP connections.
+func (c *Server) Initialize() error {
 	serverConfig := &ssh.ServerConfig{
 		NoClientAuth: false,
 		MaxAuthTries: 6,

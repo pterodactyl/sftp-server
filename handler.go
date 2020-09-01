@@ -30,10 +30,11 @@ func (fs FileSystem) buildPath(p string) (string, error) {
 }
 
 const (
-	PermissionFileRead   = "file.read"
-	PermissionFileCreate = "file.create"
-	PermissionFileUpdate = "file.update"
-	PermissionFileDelete = "file.delete"
+	PermissionFileRead        = "file.read"
+	PermissionFileReadContent = "file.read-content"
+	PermissionFileCreate      = "file.create"
+	PermissionFileUpdate      = "file.update"
+	PermissionFileDelete      = "file.delete"
 )
 
 // Fileread creates a reader for a file on the system and returns the reader back.
@@ -41,7 +42,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	// Check first if the user can actually open and view a file. This permission is named
 	// really poorly, but it is checking if they can read. There is an addition permission,
 	// "save-files" which determines if they can write that file.
-	if !fs.can(PermissionFileRead) {
+	if !fs.can(PermissionFileReadContent) {
 		return nil, sftp.ErrSshFxPermissionDenied
 	}
 
@@ -187,8 +188,11 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 	switch request.Method {
 	case "Setstat":
-		var mode os.FileMode = 0644
+		if !fs.can(PermissionFileUpdate) {
+			return sftp.ErrSshFxPermissionDenied
+		}
 
+		var mode os.FileMode = 0644
 		// If the client passed a valid file permission use that, otherwise use the
 		// default of 0644 set above.
 		if request.Attributes().FileMode().Perm() != 0000 {
